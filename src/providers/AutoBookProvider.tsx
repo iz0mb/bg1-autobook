@@ -198,11 +198,15 @@ export default function AutoBookProvider({
 
     let lastSkipWebhookMsg: string | null = null;
 
+    const safeSetStatus = (s: AutoBookStatus) => {
+      if (!cancelled) setStatus(s);
+    };
+
     async function checkOnce() {
       if (checking.current || cancelled) return;
       checking.current = true;
       const lastChecked = DateTime.now().toString();
-      setStatus({ lastChecked, message: 'Checking', running: true });
+      safeSetStatus({ lastChecked, message: 'Checking', running: true });
 
       try {
         const targetIds = new Set(config.targetIds);
@@ -217,7 +221,7 @@ export default function AutoBookProvider({
           );
 
         if (experiences.length === 0) {
-          setStatus({
+          safeSetStatus({
             lastChecked,
             message: `No targets in list (${config.targetIds.length} configured)`,
             running: true,
@@ -281,7 +285,7 @@ export default function AutoBookProvider({
               ticketIssue === 'INVALID_PARK_ADMISSION'
                 ? 'No valid park ticket'
                 : 'Park reservation needed';
-            setStatus({ lastChecked, message: msg, running: false });
+            safeSetStatus({ lastChecked, message: msg, running: false });
             flash(msg, 'error');
             sendWebhook(config.webhookUrl, {
               type: 'ticket_issue',
@@ -317,7 +321,7 @@ export default function AutoBookProvider({
               guestCount: booking.guests.length,
             });
             saveConfig({ ...config, enabled: false });
-            setStatus({
+            safeSetStatus({
               lastChecked,
               message: `Booked ${booking.experience.name} for ${formatTime(
                 booking.start.time
@@ -342,7 +346,7 @@ export default function AutoBookProvider({
         const finalMsg = firstSkipMsg
           ? `${skippedCount}/${experiences.length} skipped — ${firstSkipMsg}`
           : 'No targets available';
-        setStatus({ lastChecked, message: finalMsg, running: true });
+        safeSetStatus({ lastChecked, message: finalMsg, running: true });
         if (lastSkipMsg && lastSkipMsg !== lastSkipWebhookMsg) {
           lastSkipWebhookMsg = lastSkipMsg;
           sendWebhook(config.webhookUrl, {
@@ -353,7 +357,7 @@ export default function AutoBookProvider({
       } catch (error: any) {
         console.error(error);
         const errMsg = error?.message ?? error?.name ?? 'Auto-book check failed';
-        setStatus({
+        safeSetStatus({
           lastChecked,
           message: error?.name ?? 'Auto-book check failed',
           running: false,
