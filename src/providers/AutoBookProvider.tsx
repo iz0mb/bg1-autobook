@@ -196,6 +196,8 @@ export default function AutoBookProvider({
   const startWebhookFingerprint = useRef<string | null>(null);
   const programmaticStopRef = useRef(false);
   const wasEnabledRef = useRef(config.enabled);
+  const lastSkipWebhookMsgRef = useRef<string | null>(null);
+  const consecutiveSameSkipCountRef = useRef(0);
 
   const saveConfig = useCallback((newConfig: AutoBookConfig) => {
     newConfig = {
@@ -234,11 +236,6 @@ export default function AutoBookProvider({
       return;
     }
 
-    const startFingerprint = `${park.id}:${bookingDate}:${config.targetIds.join(',')}`;
-    if (startWebhookFingerprint.current !== startFingerprint) {
-      startWebhookFingerprint.current = startFingerprint;
-    }
-
     wasEnabledRef.current = true;
     let cancelled = false;
     const currentBookings = plans
@@ -264,9 +261,6 @@ export default function AutoBookProvider({
     const targetOrder = new Map(
       config.targetIds.map((id, index) => [id, index])
     );
-
-    let lastSkipWebhookMsg: string | null = null;
-    let consecutiveSameSkipCount = 0;
 
     const safeSetStatus = (s: AutoBookStatus) => {
       if (!cancelled) setStatus(s);
@@ -300,6 +294,8 @@ export default function AutoBookProvider({
         const startFingerprint = `${park.id}:${bookingDate}:${config.targetIds.join(',')}`;
         if (startWebhookFingerprint.current !== startFingerprint) {
           startWebhookFingerprint.current = startFingerprint;
+          lastSkipWebhookMsgRef.current = null;
+          consecutiveSameSkipCountRef.current = 0;
           const targetNames = config.targetIds.map(
             id => allExps.find(e => e.id === id)?.name ?? `Ride (...${id.slice(-4)})`
           );
@@ -484,9 +480,9 @@ export default function AutoBookProvider({
             ? 'All targets booked'
             : 'No targets currently available';
         safeSetStatus({ lastChecked, message: finalMsg, running: true });
-        if (lastSkipMsg && firstSkipMsg !== lastSkipWebhookMsg) {
-          lastSkipWebhookMsg = firstSkipMsg;
-          consecutiveSameSkipCount = 1;
+        if (lastSkipMsg && firstSkipMsg !== lastSkipWebhookMsgRef.current) {
+          lastSkipWebhookMsgRef.current = firstSkipMsg;
+          consecutiveSameSkipCountRef.current = 1;
           sendWebhook(config.webhookUrl, {
             type: 'skip',
             firstSkipReason: firstSkipMsg ?? 'Unknown reason',
@@ -494,8 +490,8 @@ export default function AutoBookProvider({
             totalTargets: experiences.length,
           }).catch(console.error);
         } else if (firstSkipMsg) {
-          consecutiveSameSkipCount++;
-          if (consecutiveSameSkipCount >= 10) {
+          consecutiveSameSkipCountRef.current++;
+          if (consecutiveSameSkipCountRef.current >= 10) {
             stopAutoBooker(
               `Auto-stopped: same skip after 10 cycles \u2014 ${firstSkipMsg}`
             );
