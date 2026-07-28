@@ -696,17 +696,8 @@ export const experiences: ResortData['experiences'] = {
     avgWait: 35,
     highlight: true,
   },
-  412380330: {
-    name: "Soarin' Around the World",
-    land: nature,
-    type: 'A',
-    geo: [28.3735924, -81.5522783],
-    priority: 3.0,
-    avgWait: 33,
-    highlight: true,
-  },
   412577054: {
-    name: "Soarin' Around the World",
+    name: "Soarin' Across America",
     land: nature,
     type: 'A',
     geo: [28.3735924, -81.5522783],
