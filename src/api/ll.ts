@@ -262,6 +262,7 @@ export abstract class LLClient extends ApiClient {
     return data.availableExperiences.flatMap(exp => {
       try {
         return {
+          flex: {},
           ...replaceTimeStrings(exp),
           ...this.resort.experience(exp.id),
           park,
