@@ -13,7 +13,6 @@ import BookingDateContext from '@/contexts/BookingDateContext';
 import ClientsContext from '@/contexts/ClientsContext';
 import ParkContext from '@/contexts/ParkContext';
 import PlansContext from '@/contexts/PlansContext';
-import ResortContext from '@/contexts/ResortContext';
 import { DateTime, formatTime, parkDate } from '@/datetime';
 import kvdb from '@/kvdb';
 
@@ -42,27 +41,70 @@ function isCloseEnough(
   return secondsFromNow >= 0 && secondsFromNow <= maxMinutes * 60;
 }
 
-async function sendWebhook(
-  url: string,
-  message: {
-    experienceName: string;
-    startTime: string;
-    date: string;
-    guestCount: number;
-    resortId: string;
-  }
-) {
+type WebhookEvent =
+  | { type: 'started'; parkName: string; date: string; targetCount: number }
+  | {
+      type: 'booked';
+      experienceName: string;
+      startTime: string;
+      date: string;
+      guestCount: number;
+    }
+  | { type: 'ticket_issue'; reason: IneligibleReason }
+  | { type: 'error'; message: string };
+
+async function sendWebhook(url: string, event: WebhookEvent) {
   if (!url.trim()) return;
+  let title: string;
+  let description: string;
+  let color: number;
+  const fields: { name: string; value: string; inline?: boolean }[] = [];
+
+  switch (event.type) {
+    case 'started':
+      title = '🟢 Auto Book Started';
+      description = `Polling **${event.parkName}** on **${event.date}** — ${event.targetCount} target${event.targetCount === 1 ? '' : 's'}`;
+      color = 0x5865f2;
+      break;
+    case 'booked':
+      title = '✅ Booked!';
+      description = `**${event.experienceName}**`;
+      color = 0x57f287;
+      fields.push(
+        { name: 'Time', value: formatTime(event.startTime), inline: true },
+        { name: 'Date', value: event.date, inline: true },
+        { name: 'Guests', value: String(event.guestCount), inline: true }
+      );
+      break;
+    case 'ticket_issue':
+      title = '⚠️ Ticket Issue — Auto Book Stopped';
+      description =
+        event.reason === 'INVALID_PARK_ADMISSION'
+          ? 'No valid park ticket found for any party member'
+          : 'Park reservation required but not found';
+      color = 0xfee75c;
+      break;
+    case 'error':
+      title = '❌ Auto Book Error — Polling Stopped';
+      description = event.message;
+      color = 0xed4245;
+      break;
+  }
+
   await fetch(url.trim(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      content: [
-        `Booked ${message.experienceName}`,
-        `${formatTime(message.startTime)} on ${message.date}`,
-        `${message.guestCount} guest${message.guestCount === 1 ? '' : 's'}`,
-        message.resortId,
-      ].join(' | '),
+      embeds: [
+        {
+          title,
+          description,
+          color,
+          ...(fields.length > 0 && { fields }),
+          timestamp: new Date().toISOString(),
+          footer: { text: 'bg1 Auto Book' },
+        },
+      ],
     }),
   });
 }
@@ -73,7 +115,6 @@ export default function AutoBookProvider({
   children: React.ReactNode;
 }) {
   const { ll } = use(ClientsContext);
-  const resort = use(ResortContext);
   const { park } = use(ParkContext);
   const { bookingDate } = use(BookingDateContext);
   const { plans, refreshPlans } = use(PlansContext);
@@ -84,6 +125,7 @@ export default function AutoBookProvider({
     running: false,
   });
   const checking = useRef(false);
+  const startWebhookFingerprint = useRef<string | null>(null);
 
   const saveConfig = useCallback((newConfig: AutoBookConfig) => {
     newConfig = {
@@ -110,6 +152,17 @@ export default function AutoBookProvider({
         running: false,
       });
       return;
+    }
+
+    const startFingerprint = `${park.id}:${bookingDate}:${config.targetIds.join(',')}`;
+    if (startWebhookFingerprint.current !== startFingerprint) {
+      startWebhookFingerprint.current = startFingerprint;
+      sendWebhook(config.webhookUrl, {
+        type: 'started',
+        parkName: park.name,
+        date: bookingDate,
+        targetCount: config.targetIds.length,
+      }).catch(console.error);
     }
 
     let cancelled = false;
@@ -191,6 +244,10 @@ export default function AutoBookProvider({
                 : 'Park reservation needed';
             setStatus({ lastChecked, message: msg, running: false });
             flash(msg, 'error');
+            sendWebhook(config.webhookUrl, {
+              type: 'ticket_issue',
+              reason: ticketIssue,
+            }).catch(console.error);
             return;
           }
           if (guests.length === 0) continue;
@@ -213,11 +270,11 @@ export default function AutoBookProvider({
             const booking = await ll.book(offer);
             refreshPlans();
             await sendWebhook(config.webhookUrl, {
+              type: 'booked',
               experienceName: booking.experience.name,
               startTime: booking.start.time.toString(),
               date: booking.start.date,
               guestCount: booking.guests.length,
-              resortId: resort.id,
             });
             saveConfig({ ...config, enabled: false });
             setStatus({
@@ -248,11 +305,16 @@ export default function AutoBookProvider({
         });
       } catch (error: any) {
         console.error(error);
+        const errMsg = error?.message ?? error?.name ?? 'Auto-book check failed';
         setStatus({
           lastChecked,
           message: error?.name ?? 'Auto-book check failed',
           running: false,
         });
+        sendWebhook(config.webhookUrl, {
+          type: 'error',
+          message: errMsg,
+        }).catch(console.error);
       } finally {
         checking.current = false;
       }
@@ -264,7 +326,7 @@ export default function AutoBookProvider({
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, [bookingDate, config, ll, park, plans, refreshPlans, resort, saveConfig]);
+  }, [bookingDate, config, ll, park, plans, refreshPlans, saveConfig]);
 
   return (
     <AutoBookContext value={{ config, saveConfig, status }}>
