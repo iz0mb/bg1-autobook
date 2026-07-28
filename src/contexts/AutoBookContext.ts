@@ -8,6 +8,7 @@ export interface AutoBookConfig {
   maxMinutesFromNow: number;
   targetIds: string[];
   webhookUrl: string;
+  upgradeExisting: boolean;
 }
 
 export interface AutoBookStatus {
@@ -28,6 +29,7 @@ export const DEFAULT_AUTO_BOOK_CONFIG: AutoBookConfig = {
   maxMinutesFromNow: 120,
   targetIds: [],
   webhookUrl: '',
+  upgradeExisting: false,
 };
 
 export default createContext<AutoBookContextValue>({

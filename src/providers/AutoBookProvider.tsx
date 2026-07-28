@@ -25,6 +25,7 @@ function loadConfig(): AutoBookConfig {
     intervalSeconds: Math.max(1, Math.min(30, config.intervalSeconds ?? 3)),
     maxMinutesFromNow: Math.max(1, config.maxMinutesFromNow ?? 120),
     webhookUrl: typeof config.webhookUrl === 'string' ? config.webhookUrl : '',
+    upgradeExisting: config.upgradeExisting === true,
   };
 }
 
@@ -47,6 +48,14 @@ type WebhookEvent =
       type: 'booked';
       experienceName: string;
       startTime: string;
+      date: string;
+      guestCount: number;
+    }
+  | {
+      type: 'upgraded';
+      experienceName: string;
+      startTime: string;
+      oldTime: string;
       date: string;
       guestCount: number;
     }
@@ -73,6 +82,17 @@ async function sendWebhook(url: string, event: WebhookEvent) {
       color = 0x57f287;
       fields.push(
         { name: 'Time', value: formatTime(event.startTime), inline: true },
+        { name: 'Date', value: event.date, inline: true },
+        { name: 'Guests', value: String(event.guestCount), inline: true }
+      );
+      break;
+    case 'upgraded':
+      title = '⬆️ Booking Upgraded!';
+      description = `**${event.experienceName}**`;
+      color = 0x57f287;
+      fields.push(
+        { name: 'New Time', value: formatTime(event.startTime), inline: true },
+        { name: 'Was', value: formatTime(event.oldTime), inline: true },
         { name: 'Date', value: event.date, inline: true },
         { name: 'Guests', value: String(event.guestCount), inline: true }
       );
@@ -210,8 +230,10 @@ export default function AutoBookProvider({
 
       try {
         const targetIds = new Set(config.targetIds);
-        const experiences = (await ll.experiences(park, bookingDate))
-          .filter(isFlexExperience)
+        const allExps = (await ll.experiences(park, bookingDate)).filter(
+          isFlexExperience
+        );
+        const experiences = allExps
           .filter(exp => targetIds.has(exp.id))
           .filter(exp => !bookedIds.has(exp.id))
           .sort(
@@ -220,7 +242,7 @@ export default function AutoBookProvider({
               (targetOrder.get(b.id) ?? Infinity)
           );
 
-        if (experiences.length === 0) {
+        if (experiences.length === 0 && !config.upgradeExisting) {
           safeSetStatus({
             lastChecked,
             message: `No targets in list (${config.targetIds.length} configured)`,
@@ -268,7 +290,11 @@ export default function AutoBookProvider({
               ) {
                 ticketIssue = reason;
               } else {
-                lastSkipMsg = `${name}: no eligible guests (${reason ?? 'unknown'})`;
+                const tierMsg =
+                  reason === 'TIER_LIMIT_REACHED'
+                    ? `${name}: tier limit — cancel an existing tier-1 LL first`
+                    : `${name}: no eligible guests (${reason ?? 'unknown'})`;
+                lastSkipMsg = tierMsg;
                 firstSkipMsg ??= lastSkipMsg;
                 skippedCount++;
               }
@@ -343,9 +369,12 @@ export default function AutoBookProvider({
           }
         }
 
-        const finalMsg = firstSkipMsg
-          ? `${skippedCount}/${experiences.length} skipped — ${firstSkipMsg}`
-          : 'No targets available';
+        const finalMsg =
+          experiences.length === 0
+            ? `No new targets available`
+            : firstSkipMsg
+              ? `${skippedCount}/${experiences.length} skipped — ${firstSkipMsg}`
+              : 'No targets available';
         safeSetStatus({ lastChecked, message: finalMsg, running: true });
         if (lastSkipMsg && lastSkipMsg !== lastSkipWebhookMsg) {
           lastSkipWebhookMsg = lastSkipMsg;
@@ -353,6 +382,58 @@ export default function AutoBookProvider({
             type: 'skip',
             message: `${skippedCount}/${experiences.length} skipped. #1: ${firstSkipMsg}`,
           }).catch(console.error);
+        }
+
+        // Upgrade pass: check booked targets for earlier available slots
+        if (config.upgradeExisting) {
+          const bookedTargets = currentBookings.filter(b =>
+            targetIds.has(b.experience.id)
+          );
+          for (const existingBooking of bookedTargets) {
+            if (cancelled) break;
+            const exp = allExps.find(
+              e => e.id === existingBooking.experience.id
+            );
+            if (!exp) continue;
+            let upGuests: Guest[] = [];
+            try {
+              const gd = await ll.guests(exp, bookingDate);
+              upGuests = gd.eligible.slice(0, ll.rules.maxPartySize);
+            } catch {
+              continue;
+            }
+            if (upGuests.length === 0) continue;
+            try {
+              const offer = await ll.offer(exp, upGuests, {
+                booking: existingBooking,
+              });
+              if (
+                +offer.start.time < +existingBooking.start.time &&
+                isCloseEnough(offer.start, config.maxMinutesFromNow)
+              ) {
+                const upgraded = await ll.book(offer);
+                refreshPlans();
+                await sendWebhook(config.webhookUrl, {
+                  type: 'upgraded',
+                  experienceName: upgraded.experience.name,
+                  startTime: upgraded.start.time.toString(),
+                  oldTime: existingBooking.start.time.toString(),
+                  date: upgraded.start.date,
+                  guestCount: upgraded.guests.length,
+                });
+                safeSetStatus({
+                  lastChecked,
+                  message: `Upgraded ${upgraded.experience.name} to ${
+                    formatTime(upgraded.start.time)
+                  } (was ${formatTime(existingBooking.start.time)})`,
+                  running: true,
+                });
+                break;
+              }
+            } catch {
+              continue;
+            }
+          }
         }
       } catch (error: any) {
         console.error(error);

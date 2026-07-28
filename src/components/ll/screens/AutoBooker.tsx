@@ -90,6 +90,7 @@ export default function AutoBooker() {
       maxMinutesFromNow: Number(draft.maxMinutesFromNow) || 120,
       webhookUrl: draft.webhookUrl || '',
       enabled: !!draft.enabled,
+      upgradeExisting: !!draft.upgradeExisting,
     };
 
     localStorage.setItem(AUTO_BOOK_KEY, JSON.stringify(cleanDraft));
@@ -120,6 +121,16 @@ export default function AutoBooker() {
             onChange={event => update({ enabled: event.currentTarget.checked })}
           />
           Auto book matching Lightning Lanes
+        </label>
+        <label className="flex items-center gap-x-2 mt-2 text-sm">
+          <input
+            type="checkbox"
+            checked={draft.upgradeExisting}
+            onChange={event =>
+              update({ upgradeExisting: event.currentTarget.checked })
+            }
+          />
+          Upgrade existing bookings to earlier times
         </label>
         <p className="mt-2 text-sm text-gray-600">
           Status: {status.message}
