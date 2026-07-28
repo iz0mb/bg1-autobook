@@ -259,7 +259,8 @@ export abstract class LLClient extends ApiClient {
       ? ParkTime.from(nextBookTimeString)
       : undefined;
 
-    return data.availableExperiences.flatMap(exp => {
+    const unknownIds: string[] = [];
+    const result = data.availableExperiences.flatMap(exp => {
       try {
         return {
           ...replaceTimeStrings(exp),
@@ -274,10 +275,18 @@ export abstract class LLClient extends ApiClient {
           experienced: this.tracker.experienced(exp),
         };
       } catch (error) {
-        if (error instanceof InvalidId) return [];
+        if (error instanceof InvalidId) {
+          unknownIds.push(exp.id);
+          return [];
+        }
         throw error;
       }
     });
+    // TEMP DIAGNOSTIC: Remove after identifying unknown experience IDs
+    if (unknownIds.length > 0) {
+      setTimeout(() => alert('Unknown IDs (screenshot this):\n' + unknownIds.join('\n')), 500);
+    }
+    return result;
   }
 
   track(bookings: Booking[]) {
