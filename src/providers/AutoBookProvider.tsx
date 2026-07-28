@@ -385,6 +385,12 @@ export default function AutoBookProvider({
                 reason === 'PARK_RESERVATION_NEEDED'
               ) {
                 ticketIssue = reason;
+              } else if (config.dryRun && guestData.ineligible.length > 0) {
+                // Dry run: bypass eligibility (no LLMP tickets etc.) and use guests anyway
+                guests = (guestData.ineligible as unknown as Guest[]).slice(
+                  0,
+                  ll.rules.maxPartySize
+                );
               } else {
                 const tierMsg =
                   reason === 'TIER_LIMIT_REACHED'
@@ -419,7 +425,7 @@ export default function AutoBookProvider({
             return;
           }
           if (guests.length === 0) continue;
-          if (!hasAvailableSlot(guests)) {
+          if (!config.dryRun && !hasAvailableSlot(guests)) {
             lastSkipMsg = `${name}: party has 3 active LLs`;
             firstSkipMsg ??= lastSkipMsg;
             skippedCount++;
