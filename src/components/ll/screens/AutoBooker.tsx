@@ -34,6 +34,7 @@ function loadSavedAutoBookConfig(config: AutoBookConfig): AutoBookConfig {
         Number(saved.maxMinutesFromNow) || config.maxMinutesFromNow,
       webhookUrl: typeof saved.webhookUrl === 'string' ? saved.webhookUrl : '',
       enabled: !!saved.enabled,
+      upgradeExisting: saved.upgradeExisting === true,
     };
   } catch {
     return config;

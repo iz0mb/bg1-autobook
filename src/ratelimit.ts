@@ -14,6 +14,7 @@ export class RateLimit {
     if (this.lastRequestTime !== now) {
       this.lastRequestTime = now;
       this.requestCount = 0;
+      this.limitExceededTime = 0;
     }
     if (++this.requestCount > this.requestsPerSecond) {
       this.limitExceededTime = now;

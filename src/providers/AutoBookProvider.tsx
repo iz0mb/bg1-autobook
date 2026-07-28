@@ -386,8 +386,8 @@ export default function AutoBookProvider({
               ? `${skippedCount}/${experiences.length} skipped — ${firstSkipMsg}`
               : 'No targets available';
         safeSetStatus({ lastChecked, message: finalMsg, running: true });
-        if (lastSkipMsg && lastSkipMsg !== lastSkipWebhookMsg) {
-          lastSkipWebhookMsg = lastSkipMsg;
+        if (lastSkipMsg && firstSkipMsg !== lastSkipWebhookMsg) {
+          lastSkipWebhookMsg = firstSkipMsg;
           sendWebhook(config.webhookUrl, {
             type: 'skip',
             message: `${skippedCount}/${experiences.length} skipped. #1: ${firstSkipMsg}`,
@@ -447,6 +447,14 @@ export default function AutoBookProvider({
         }
       } catch (error: any) {
         console.error(error);
+        if (error?.name === 'RateLimitExceeded') {
+          safeSetStatus({
+            lastChecked,
+            message: 'Rate limited — will retry',
+            running: true,
+          });
+          return;
+        }
         const errMsg = error?.message ?? error?.name ?? 'Auto-book check failed';
         safeSetStatus({
           lastChecked,
