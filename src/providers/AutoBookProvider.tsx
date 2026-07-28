@@ -1,7 +1,7 @@
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 
 import { isLLMP } from '@/api/itinerary';
-import { FlexExperience, Guest, OfferError, OfferExperience } from '@/api/ll';
+import { FlexExperience, Guest, IneligibleReason, OfferError, OfferExperience } from '@/api/ll';
 import AutoBookContext, {
   AUTO_BOOK_KEY,
   AutoBookConfig,
@@ -164,15 +164,34 @@ export default function AutoBookProvider({
             continue;
           }
 
-          let guests: Guest[];
+          let guests: Guest[] = [];
+          let ticketIssue: IneligibleReason | undefined;
           try {
-            guests = (await ll.guests(experience, bookingDate)).eligible.slice(
-              0,
-              ll.rules.maxPartySize
-            );
+            const guestData = await ll.guests(experience, bookingDate);
+            guests = guestData.eligible.slice(0, ll.rules.maxPartySize);
+            if (guests.length === 0) {
+              const reason = guestData.ineligible[0]?.ineligibleReason;
+              if (
+                reason === 'INVALID_PARK_ADMISSION' ||
+                reason === 'PARK_RESERVATION_NEEDED'
+              ) {
+                ticketIssue = reason;
+              }
+            }
           } catch (error) {
             console.error(error);
             continue;
+          }
+          if (ticketIssue) {
+            setStatus({
+              lastChecked,
+              message:
+                ticketIssue === 'INVALID_PARK_ADMISSION'
+                  ? 'No valid park ticket'
+                  : 'Park reservation needed',
+              running: false,
+            });
+            return;
           }
           if (guests.length === 0) continue;
           if (!hasAvailableSlot(guests)) {
