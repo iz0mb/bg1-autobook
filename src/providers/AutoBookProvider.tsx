@@ -225,7 +225,9 @@ export default function AutoBookProvider({
           return;
         }
 
+        let firstSkipMsg: string | null = null;
         let lastSkipMsg: string | null = null;
+        let skippedCount = 0;
 
         for (const experience of experiences) {
           const name = experience.name;
@@ -239,6 +241,8 @@ export default function AutoBookProvider({
               )
             ) {
               lastSkipMsg = `${name}: next slot ${formatTime(nextTime)} too far`;
+              firstSkipMsg ??= lastSkipMsg;
+              skippedCount++;
               continue;
             }
           }
@@ -261,11 +265,15 @@ export default function AutoBookProvider({
                 ticketIssue = reason;
               } else {
                 lastSkipMsg = `${name}: no eligible guests (${reason ?? 'unknown'})`;
+                firstSkipMsg ??= lastSkipMsg;
+                skippedCount++;
               }
             }
           } catch (error: any) {
             console.error(error);
             lastSkipMsg = `${name}: guests call failed (${error?.name ?? 'error'})`;
+            firstSkipMsg ??= lastSkipMsg;
+            skippedCount++;
             continue;
           }
           if (ticketIssue) {
@@ -284,6 +292,8 @@ export default function AutoBookProvider({
           if (guests.length === 0) continue;
           if (!hasAvailableSlot(guests)) {
             lastSkipMsg = `${name}: party has 3 active LLs`;
+            firstSkipMsg ??= lastSkipMsg;
+            skippedCount++;
             continue;
           }
 
@@ -293,6 +303,8 @@ export default function AutoBookProvider({
             });
             if (!isCloseEnough(offer.start, config.maxMinutesFromNow)) {
               lastSkipMsg = `${name}: offer at ${formatTime(offer.start.time)} too far`;
+              firstSkipMsg ??= lastSkipMsg;
+              skippedCount++;
               continue;
             }
             const booking = await ll.book(offer);
@@ -319,19 +331,23 @@ export default function AutoBookProvider({
               error?.response?.status === 410
             ) {
               lastSkipMsg = `${name}: offer unavailable`;
+              firstSkipMsg ??= lastSkipMsg;
+              skippedCount++;
               continue;
             }
             throw error;
           }
         }
 
-        const finalMsg = lastSkipMsg ?? 'No targets available';
+        const finalMsg = firstSkipMsg
+          ? `${skippedCount}/${experiences.length} skipped — ${firstSkipMsg}`
+          : 'No targets available';
         setStatus({ lastChecked, message: finalMsg, running: true });
         if (lastSkipMsg && lastSkipMsg !== lastSkipWebhookMsg) {
           lastSkipWebhookMsg = lastSkipMsg;
           sendWebhook(config.webhookUrl, {
             type: 'skip',
-            message: lastSkipMsg,
+            message: `${skippedCount}/${experiences.length} skipped. #1: ${firstSkipMsg}`,
           }).catch(console.error);
         }
       } catch (error: any) {
