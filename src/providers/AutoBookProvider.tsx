@@ -385,8 +385,8 @@ export default function AutoBookProvider({
                 reason === 'PARK_RESERVATION_NEEDED'
               ) {
                 ticketIssue = reason;
-              } else if (config.dryRun && guestData.ineligible.length > 0) {
-                // Dry run: bypass eligibility (no LLMP tickets etc.) and use guests anyway
+              } else if (config.dryRun) {
+                // Dry run: bypass all eligibility/ticket checks, use any guests
                 guests = (guestData.ineligible as unknown as Guest[]).slice(
                   0,
                   ll.rules.maxPartySize
@@ -408,7 +408,7 @@ export default function AutoBookProvider({
             skippedCount++;
             continue;
           }
-          if (ticketIssue) {
+          if (ticketIssue && !config.dryRun) {
             const msg =
               ticketIssue === 'INVALID_PARK_ADMISSION'
                 ? 'No valid park ticket'
