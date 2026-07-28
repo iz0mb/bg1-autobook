@@ -256,13 +256,24 @@ export default function AutoBookProvider({
               (targetOrder.get(b.id) ?? Infinity)
           );
 
-        if (experiences.length === 0 && !config.upgradeExisting) {
-          safeSetStatus({
-            lastChecked,
-            message: `No targets in list (${config.targetIds.length} configured)`,
-            running: true,
-          });
-          return;
+        const allBooked =
+          config.targetIds.length > 0 &&
+          config.targetIds.every(id => bookedIds.has(id));
+
+        if (experiences.length === 0) {
+          if (!config.upgradeExisting) {
+            if (allBooked) {
+              stopAutoBooker('All configured targets have been booked');
+            } else {
+              safeSetStatus({
+                lastChecked,
+                message: `Targets not currently available (${config.targetIds.length} configured)`,
+                running: true,
+              });
+            }
+            return;
+          }
+          // upgradeExisting: fall through to upgrade pass
         }
 
         let firstSkipMsg: string | null = null;
@@ -361,9 +372,24 @@ export default function AutoBookProvider({
               date: booking.start.date,
               guestCount: booking.guests.length,
             });
+            const justBookedIds = new Set([...bookedIds, booking.experience.id]);
+            const remaining = config.targetIds.filter(
+              id => !justBookedIds.has(id)
+            ).length;
             const bookedMsg = `Booked ${booking.experience.name} for ${formatTime(booking.start.time)}`;
-            safeSetStatus({ lastChecked, message: bookedMsg, running: false });
-            stopAutoBooker(bookedMsg);
+            if (remaining === 0 && !config.upgradeExisting) {
+              safeSetStatus({ lastChecked, message: bookedMsg, running: false });
+              stopAutoBooker('All targets booked! Last: ' + bookedMsg);
+            } else {
+              safeSetStatus({
+                lastChecked,
+                message:
+                  remaining > 0
+                    ? `${bookedMsg} — ${remaining} target${remaining === 1 ? '' : 's'} remaining`
+                    : bookedMsg,
+                running: true,
+              });
+            }
             return;
           } catch (error: any) {
             if (
@@ -379,12 +405,11 @@ export default function AutoBookProvider({
           }
         }
 
-        const finalMsg =
-          experiences.length === 0
-            ? `No new targets available`
-            : firstSkipMsg
-              ? `${skippedCount}/${experiences.length} skipped — ${firstSkipMsg}`
-              : 'No targets available';
+        const finalMsg = firstSkipMsg
+          ? `${skippedCount}/${experiences.length} skipped — ${firstSkipMsg}`
+          : allBooked
+            ? 'All targets booked'
+            : 'No targets currently available';
         safeSetStatus({ lastChecked, message: finalMsg, running: true });
         if (lastSkipMsg && firstSkipMsg !== lastSkipWebhookMsg) {
           lastSkipWebhookMsg = firstSkipMsg;
