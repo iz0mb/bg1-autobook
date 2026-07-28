@@ -43,7 +43,7 @@ function isCloseEnough(
 }
 
 type WebhookEvent =
-  | { type: 'started'; parkName: string; date: string; targetCount: number; intervalSeconds: number; maxMinutesFromNow: number; upgradeExisting: boolean }
+  | { type: 'started'; parkName: string; date: string; targetNames: string[]; intervalSeconds: number; maxMinutesFromNow: number; upgradeExisting: boolean }
   | {
       type: 'booked';
       experienceName: string;
@@ -79,10 +79,14 @@ async function sendWebhook(url: string, event: WebhookEvent) {
       description = `Polling **${event.parkName}** on **${event.date}**`;
       color = 0x5865f2;
       fields.push(
-        { name: 'Rides Queued', value: String(event.targetCount), inline: true },
         { name: 'Poll Interval', value: `${event.intervalSeconds}s`, inline: true },
         { name: 'Time Window', value: `≤ ${event.maxMinutesFromNow} min from now`, inline: true },
-        { name: 'Upgrade Existing', value: event.upgradeExisting ? 'Yes' : 'No', inline: true }
+        { name: 'Upgrade Existing', value: event.upgradeExisting ? 'Yes' : 'No', inline: true },
+        {
+          name: `Rides Queued (${event.targetNames.length})`,
+          value: event.targetNames.join('\n'),
+          inline: false,
+        }
       );
       break;
     case 'booked':
@@ -190,6 +194,8 @@ export default function AutoBookProvider({
   });
   const checking = useRef(false);
   const startWebhookFingerprint = useRef<string | null>(null);
+  const programmaticStopRef = useRef(false);
+  const wasEnabledRef = useRef(config.enabled);
 
   const saveConfig = useCallback((newConfig: AutoBookConfig) => {
     newConfig = {
@@ -203,6 +209,16 @@ export default function AutoBookProvider({
 
   useEffect(() => {
     if (!config.enabled) {
+      if (wasEnabledRef.current && !programmaticStopRef.current) {
+        sendWebhook(config.webhookUrl, {
+          type: 'stopped',
+          reason: 'Manually stopped',
+          parkName: park.name,
+          date: bookingDate,
+        }).catch(console.error);
+      }
+      programmaticStopRef.current = false;
+      wasEnabledRef.current = false;
       setStatus(status => ({
         ...status,
         message: status.message.startsWith('Booked ') ? status.message : 'Off',
@@ -221,17 +237,9 @@ export default function AutoBookProvider({
     const startFingerprint = `${park.id}:${bookingDate}:${config.targetIds.join(',')}`;
     if (startWebhookFingerprint.current !== startFingerprint) {
       startWebhookFingerprint.current = startFingerprint;
-      sendWebhook(config.webhookUrl, {
-        type: 'started',
-        parkName: park.name,
-        date: bookingDate,
-        targetCount: config.targetIds.length,
-        intervalSeconds: config.intervalSeconds,
-        maxMinutesFromNow: config.maxMinutesFromNow,
-        upgradeExisting: config.upgradeExisting,
-      }).catch(console.error);
     }
 
+    wasEnabledRef.current = true;
     let cancelled = false;
     const currentBookings = plans
       .filter(isLLMP)
@@ -258,6 +266,7 @@ export default function AutoBookProvider({
     );
 
     let lastSkipWebhookMsg: string | null = null;
+    let consecutiveSameSkipCount = 0;
 
     const safeSetStatus = (s: AutoBookStatus) => {
       if (!cancelled) setStatus(s);
@@ -265,6 +274,7 @@ export default function AutoBookProvider({
 
     const stopAutoBooker = (reason: string) => {
       if (cancelled) return;
+      programmaticStopRef.current = true;
       saveConfig({ ...config, enabled: false });
       sendWebhook(config.webhookUrl, {
         type: 'stopped',
@@ -285,6 +295,24 @@ export default function AutoBookProvider({
         const allExps = (await ll.experiences(park, bookingDate)).filter(
           isFlexExperience
         );
+
+        // Send started webhook on first check of each session (has real ride names)
+        const startFingerprint = `${park.id}:${bookingDate}:${config.targetIds.join(',')}`;
+        if (startWebhookFingerprint.current !== startFingerprint) {
+          startWebhookFingerprint.current = startFingerprint;
+          const targetNames = config.targetIds.map(
+            id => allExps.find(e => e.id === id)?.name ?? `Ride (...${id.slice(-4)})`
+          );
+          sendWebhook(config.webhookUrl, {
+            type: 'started',
+            parkName: park.name,
+            date: bookingDate,
+            targetNames,
+            intervalSeconds: config.intervalSeconds,
+            maxMinutesFromNow: config.maxMinutesFromNow,
+            upgradeExisting: config.upgradeExisting,
+          }).catch(console.error);
+        }
         const experiences = allExps
           .filter(exp => targetIds.has(exp.id))
           .filter(exp => !bookedIds.has(exp.id))
@@ -458,12 +486,21 @@ export default function AutoBookProvider({
         safeSetStatus({ lastChecked, message: finalMsg, running: true });
         if (lastSkipMsg && firstSkipMsg !== lastSkipWebhookMsg) {
           lastSkipWebhookMsg = firstSkipMsg;
+          consecutiveSameSkipCount = 1;
           sendWebhook(config.webhookUrl, {
             type: 'skip',
             firstSkipReason: firstSkipMsg ?? 'Unknown reason',
             skippedCount,
             totalTargets: experiences.length,
           }).catch(console.error);
+        } else if (firstSkipMsg) {
+          consecutiveSameSkipCount++;
+          if (consecutiveSameSkipCount >= 10) {
+            stopAutoBooker(
+              `Auto-stopped: same skip after 10 cycles \u2014 ${firstSkipMsg}`
+            );
+            return;
+          }
         }
 
         // Upgrade pass: check booked targets for earlier available slots
