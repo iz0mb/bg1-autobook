@@ -341,6 +341,7 @@ export default function AutoBookProvider({
         let firstSkipMsg: string | null = null;
         let lastSkipMsg: string | null = null;
         let skippedCount = 0;
+        let permanentSkipsOnly = true; // flipped false on any transient skip
 
         for (const experience of experiences) {
           const name = experience.name;
@@ -356,6 +357,7 @@ export default function AutoBookProvider({
               lastSkipMsg = `${name}: next slot ${formatTime(nextTime)} too far`;
               firstSkipMsg ??= lastSkipMsg;
               skippedCount++;
+              permanentSkipsOnly = false;
               continue;
             }
           }
@@ -391,6 +393,7 @@ export default function AutoBookProvider({
             lastSkipMsg = `${name}: guests call failed (${error?.name ?? 'error'})`;
             firstSkipMsg ??= lastSkipMsg;
             skippedCount++;
+            permanentSkipsOnly = false;
             continue;
           }
           if (ticketIssue) {
@@ -414,6 +417,7 @@ export default function AutoBookProvider({
             lastSkipMsg = `${name}: party has 3 active LLs`;
             firstSkipMsg ??= lastSkipMsg;
             skippedCount++;
+            permanentSkipsOnly = false;
             continue;
           }
 
@@ -425,6 +429,7 @@ export default function AutoBookProvider({
               lastSkipMsg = `${name}: offer at ${formatTime(offer.start.time)} too far`;
               firstSkipMsg ??= lastSkipMsg;
               skippedCount++;
+              permanentSkipsOnly = false;
               continue;
             }
             const booking = await ll.book(offer);
@@ -468,6 +473,7 @@ export default function AutoBookProvider({
               lastSkipMsg = `${name}: offer unavailable`;
               firstSkipMsg ??= lastSkipMsg;
               skippedCount++;
+              permanentSkipsOnly = false;
               continue;
             }
             throw error;
@@ -482,21 +488,23 @@ export default function AutoBookProvider({
         safeSetStatus({ lastChecked, message: finalMsg, running: true });
         if (lastSkipMsg && firstSkipMsg !== lastSkipWebhookMsgRef.current) {
           lastSkipWebhookMsgRef.current = firstSkipMsg;
-          consecutiveSameSkipCountRef.current = 1;
+          consecutiveSameSkipCountRef.current = permanentSkipsOnly ? 1 : 0;
           sendWebhook(config.webhookUrl, {
             type: 'skip',
             firstSkipReason: firstSkipMsg ?? 'Unknown reason',
             skippedCount,
             totalTargets: experiences.length,
           }).catch(console.error);
-        } else if (firstSkipMsg) {
+        } else if (firstSkipMsg && permanentSkipsOnly) {
           consecutiveSameSkipCountRef.current++;
           if (consecutiveSameSkipCountRef.current >= 10) {
             stopAutoBooker(
-              `Auto-stopped: same skip after 10 cycles \u2014 ${firstSkipMsg}`
+              `Auto-stopped: ${firstSkipMsg} (10 consecutive cycles)`
             );
             return;
           }
+        } else {
+          consecutiveSameSkipCountRef.current = 0;
         }
 
         // Upgrade pass: check booked targets for earlier available slots
