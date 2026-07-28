@@ -50,6 +50,7 @@ type WebhookEvent =
       startTime: string;
       date: string;
       guestCount: number;
+      remaining: number;
     }
   | {
       type: 'upgraded';
@@ -86,6 +87,13 @@ async function sendWebhook(url: string, event: WebhookEvent) {
         { name: 'Date', value: event.date, inline: true },
         { name: 'Guests', value: String(event.guestCount), inline: true }
       );
+      if (event.remaining > 0) {
+        fields.push({
+          name: 'Remaining',
+          value: `${event.remaining} target${event.remaining === 1 ? '' : 's'} left`,
+          inline: true,
+        });
+      }
       break;
     case 'upgraded':
       title = '⬆️ Booking Upgraded!';
@@ -365,17 +373,18 @@ export default function AutoBookProvider({
             }
             const booking = await ll.book(offer);
             refreshPlans();
+            const justBookedIds = new Set([...bookedIds, booking.experience.id]);
+            const remaining = config.targetIds.filter(
+              id => !justBookedIds.has(id)
+            ).length;
             await sendWebhook(config.webhookUrl, {
               type: 'booked',
               experienceName: booking.experience.name,
               startTime: booking.start.time.toString(),
               date: booking.start.date,
               guestCount: booking.guests.length,
+              remaining,
             });
-            const justBookedIds = new Set([...bookedIds, booking.experience.id]);
-            const remaining = config.targetIds.filter(
-              id => !justBookedIds.has(id)
-            ).length;
             const bookedMsg = `Booked ${booking.experience.name} for ${formatTime(booking.start.time)}`;
             if (remaining === 0 && !config.upgradeExisting) {
               safeSetStatus({ lastChecked, message: bookedMsg, running: false });
