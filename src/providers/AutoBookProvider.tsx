@@ -43,7 +43,7 @@ function isCloseEnough(
 }
 
 type WebhookEvent =
-  | { type: 'started'; parkName: string; date: string; targetCount: number }
+  | { type: 'started'; parkName: string; date: string; targetCount: number; intervalSeconds: number; maxMinutesFromNow: number; upgradeExisting: boolean }
   | {
       type: 'booked';
       experienceName: string;
@@ -51,6 +51,7 @@ type WebhookEvent =
       date: string;
       guestCount: number;
       remaining: number;
+      remainingNames: string[];
     }
   | {
       type: 'upgraded';
@@ -60,10 +61,10 @@ type WebhookEvent =
       date: string;
       guestCount: number;
     }
-  | { type: 'ticket_issue'; reason: IneligibleReason }
-  | { type: 'skip'; message: string }
-  | { type: 'error'; message: string }
-  | { type: 'stopped'; reason: string };
+  | { type: 'ticket_issue'; reason: IneligibleReason; parkName: string; date: string }
+  | { type: 'skip'; firstSkipReason: string; skippedCount: number; totalTargets: number }
+  | { type: 'error'; message: string; parkName: string; date: string }
+  | { type: 'stopped'; reason: string; parkName: string; date: string };
 
 async function sendWebhook(url: string, event: WebhookEvent) {
   if (!url.trim()) return;
@@ -75,8 +76,14 @@ async function sendWebhook(url: string, event: WebhookEvent) {
   switch (event.type) {
     case 'started':
       title = '🟢 Auto Book Started';
-      description = `Polling **${event.parkName}** on **${event.date}** — ${event.targetCount} target${event.targetCount === 1 ? '' : 's'}`;
+      description = `Polling **${event.parkName}** on **${event.date}**`;
       color = 0x5865f2;
+      fields.push(
+        { name: 'Rides Queued', value: String(event.targetCount), inline: true },
+        { name: 'Poll Interval', value: `${event.intervalSeconds}s`, inline: true },
+        { name: 'Time Window', value: `≤ ${event.maxMinutesFromNow} min from now`, inline: true },
+        { name: 'Upgrade Existing', value: event.upgradeExisting ? 'Yes' : 'No', inline: true }
+      );
       break;
     case 'booked':
       title = '✅ Booked!';
@@ -89,10 +96,12 @@ async function sendWebhook(url: string, event: WebhookEvent) {
       );
       if (event.remaining > 0) {
         fields.push({
-          name: 'Remaining',
-          value: `${event.remaining} target${event.remaining === 1 ? '' : 's'} left`,
-          inline: true,
+          name: `Still to Book (${event.remaining})`,
+          value: event.remainingNames.join('\n'),
+          inline: false,
         });
+      } else {
+        fields.push({ name: 'Queue', value: '🎉 All targets booked!', inline: false });
       }
       break;
     case 'upgraded':
@@ -101,33 +110,48 @@ async function sendWebhook(url: string, event: WebhookEvent) {
       color = 0x57f287;
       fields.push(
         { name: 'New Time', value: formatTime(event.startTime), inline: true },
-        { name: 'Was', value: formatTime(event.oldTime), inline: true },
+        { name: 'Previous', value: formatTime(event.oldTime), inline: true },
         { name: 'Date', value: event.date, inline: true },
         { name: 'Guests', value: String(event.guestCount), inline: true }
       );
       break;
     case 'ticket_issue':
-      title = '⚠️ Ticket Issue — Auto Book Stopped';
+      title = '⚠️ Ticket Issue — Stopped';
       description =
         event.reason === 'INVALID_PARK_ADMISSION'
           ? 'No valid park ticket found for any party member'
           : 'Park reservation required but not found';
       color = 0xfee75c;
+      fields.push(
+        { name: 'Park', value: event.parkName, inline: true },
+        { name: 'Date', value: event.date, inline: true }
+      );
       break;
     case 'skip':
-      title = '⏭️ Target Skipped';
-      description = event.message;
+      title = '⏭️ Targets Skipped';
+      description = event.firstSkipReason;
       color = 0xffa500;
+      fields.push(
+        { name: 'Skipped', value: `${event.skippedCount} of ${event.totalTargets}`, inline: true }
+      );
       break;
     case 'error':
-      title = '❌ Auto Book Error — Polling Stopped';
+      title = '❌ Error — Stopped';
       description = event.message;
       color = 0xed4245;
+      fields.push(
+        { name: 'Park', value: event.parkName, inline: true },
+        { name: 'Date', value: event.date, inline: true }
+      );
       break;
     case 'stopped':
       title = '⏹️ Auto Book Stopped';
       description = event.reason;
       color = 0x99aab5;
+      fields.push(
+        { name: 'Park', value: event.parkName, inline: true },
+        { name: 'Date', value: event.date, inline: true }
+      );
       break;
   }
 
@@ -202,6 +226,9 @@ export default function AutoBookProvider({
         parkName: park.name,
         date: bookingDate,
         targetCount: config.targetIds.length,
+        intervalSeconds: config.intervalSeconds,
+        maxMinutesFromNow: config.maxMinutesFromNow,
+        upgradeExisting: config.upgradeExisting,
       }).catch(console.error);
     }
 
@@ -239,9 +266,12 @@ export default function AutoBookProvider({
     const stopAutoBooker = (reason: string) => {
       if (cancelled) return;
       saveConfig({ ...config, enabled: false });
-      sendWebhook(config.webhookUrl, { type: 'stopped', reason }).catch(
-        console.error
-      );
+      sendWebhook(config.webhookUrl, {
+        type: 'stopped',
+        reason,
+        parkName: park.name,
+        date: bookingDate,
+      }).catch(console.error);
     };
 
     async function checkOnce() {
@@ -349,6 +379,8 @@ export default function AutoBookProvider({
             sendWebhook(config.webhookUrl, {
               type: 'ticket_issue',
               reason: ticketIssue,
+              parkName: park.name,
+              date: bookingDate,
             }).catch(console.error);
             stopAutoBooker(msg);
             return;
@@ -377,6 +409,9 @@ export default function AutoBookProvider({
             const remaining = config.targetIds.filter(
               id => !justBookedIds.has(id)
             ).length;
+            const remainingNames = config.targetIds
+              .filter(id => !justBookedIds.has(id))
+              .map(id => allExps.find(e => e.id === id)?.name ?? `Ride (...${id.slice(-4)})`);
             await sendWebhook(config.webhookUrl, {
               type: 'booked',
               experienceName: booking.experience.name,
@@ -384,6 +419,7 @@ export default function AutoBookProvider({
               date: booking.start.date,
               guestCount: booking.guests.length,
               remaining,
+              remainingNames,
             });
             const bookedMsg = `Booked ${booking.experience.name} for ${formatTime(booking.start.time)}`;
             if (remaining === 0 && !config.upgradeExisting) {
@@ -424,7 +460,9 @@ export default function AutoBookProvider({
           lastSkipWebhookMsg = firstSkipMsg;
           sendWebhook(config.webhookUrl, {
             type: 'skip',
-            message: `${skippedCount}/${experiences.length} skipped. #1: ${firstSkipMsg}`,
+            firstSkipReason: firstSkipMsg ?? 'Unknown reason',
+            skippedCount,
+            totalTargets: experiences.length,
           }).catch(console.error);
         }
 
@@ -498,9 +536,10 @@ export default function AutoBookProvider({
         sendWebhook(config.webhookUrl, {
           type: 'error',
           message: errMsg,
+          parkName: park.name,
+          date: bookingDate,
         }).catch(console.error);
-        stopAutoBooker(`Error: ${errMsg}`);
-      } finally {
+        stopAutoBooker(`Error: ${errMsg}`);      } finally {
         checking.current = false;
       }
     }
