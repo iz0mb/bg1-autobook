@@ -64,7 +64,7 @@ type WebhookEvent =
       guestNames: string[];
     }
   | { type: 'ticket_issue'; reason: IneligibleReason; parkName: string; date: string }
-  | { type: 'skip'; firstSkipReason: string; skippedCount: number; totalTargets: number }
+  | { type: 'skip'; experienceName: string; reason: string }
   | { type: 'error'; message: string; parkName: string; date: string }
   | { type: 'stopped'; reason: string; parkName: string; date: string };
 
@@ -134,12 +134,10 @@ async function sendWebhook(url: string, event: WebhookEvent) {
       );
       break;
     case 'skip':
-      title = '⏭️ Targets Skipped';
-      description = event.firstSkipReason;
+      title = '⏭️ Ride Skipped';
+      description = `**${event.experienceName}**`;
       color = 0xffa500;
-      fields.push(
-        { name: 'Skipped', value: `${event.skippedCount} of ${event.totalTargets}`, inline: true }
-      );
+      fields.push({ name: 'Reason', value: event.reason, inline: false });
       break;
     case 'error':
       title = '❌ Error — Stopped';
@@ -198,7 +196,7 @@ export default function AutoBookProvider({
   const startWebhookFingerprint = useRef<string | null>(null);
   const programmaticStopRef = useRef(false);
   const wasEnabledRef = useRef(config.enabled);
-  const lastSkipWebhookMsgRef = useRef<string | null>(null);
+  const lastSkipReasonsRef = useRef<Map<string, string>>(new Map());
   const consecutiveSameSkipCountRef = useRef(0);
   const dryRunBookedIdsRef = useRef<Set<string>>(new Set());
   const dryRunUpgradeTimesRef = useRef<Map<string, any>>(new Map());
@@ -299,7 +297,7 @@ export default function AutoBookProvider({
         const startFingerprint = `${park.id}:${bookingDate}:${config.targetIds.join(',')}`;
         if (startWebhookFingerprint.current !== startFingerprint) {
           startWebhookFingerprint.current = startFingerprint;
-          lastSkipWebhookMsgRef.current = null;
+          lastSkipReasonsRef.current = new Map();
           consecutiveSameSkipCountRef.current = 0;
           dryRunBookedIdsRef.current = new Set();
           dryRunUpgradeTimesRef.current = new Map();
@@ -348,8 +346,7 @@ export default function AutoBookProvider({
         }
 
         let firstSkipMsg: string | null = null;
-        let lastSkipMsg: string | null = null;
-        let skippedCount = 0;
+        const skipsThisCycle = new Map<string, string>();
         const isPermSkip = (m: string | null) =>
           !!m &&
           (m.includes('tier limit') || m.includes('no eligible guests'));
@@ -365,9 +362,9 @@ export default function AutoBookProvider({
                 config.maxMinutesFromNow
               )
             ) {
-              lastSkipMsg = `${name}: next slot ${formatTime(nextTime)} too far`;
-              firstSkipMsg ??= lastSkipMsg;
-              skippedCount++;
+              const skipReason = `next slot ${formatTime(nextTime)} too far`;
+              skipsThisCycle.set(experience.id, skipReason);
+              firstSkipMsg ??= `${name}: ${skipReason}`;
               continue;
             }
           }
@@ -397,18 +394,17 @@ export default function AutoBookProvider({
               } else {
                 const tierMsg =
                   reason === 'TIER_LIMIT_REACHED'
-                    ? `${name}: tier limit — cancel an existing tier-1 LL first`
-                    : `${name}: no eligible guests (${reason ?? 'unknown'})`;
-                lastSkipMsg = tierMsg;
-                firstSkipMsg ??= lastSkipMsg;
-                skippedCount++;
+                    ? `tier limit — cancel an existing tier-1 LL first`
+                    : `no eligible guests (${reason ?? 'unknown'})`;
+                skipsThisCycle.set(experience.id, tierMsg);
+                firstSkipMsg ??= `${name}: ${tierMsg}`;
               }
             }
           } catch (error: any) {
             console.error(error);
-            lastSkipMsg = `${name}: guests call failed (${error?.name ?? 'error'})`;
-            firstSkipMsg ??= lastSkipMsg;
-            skippedCount++;
+            const guestFailReason = `guests call failed (${error?.name ?? 'error'})`;
+            skipsThisCycle.set(experience.id, guestFailReason);
+            firstSkipMsg ??= `${name}: ${guestFailReason}`;
             continue;
           }
           if (ticketIssue && !config.dryRun) {
@@ -429,9 +425,8 @@ export default function AutoBookProvider({
           }
           if (guests.length === 0) continue;
           if (!config.dryRun && !hasAvailableSlot(guests)) {
-            lastSkipMsg = `${name}: party has 3 active LLs`;
-            firstSkipMsg ??= lastSkipMsg;
-            skippedCount++;
+            skipsThisCycle.set(experience.id, 'party has 3 active LLs');
+            firstSkipMsg ??= `${name}: party has 3 active LLs`;
             continue;
           }
 
@@ -440,9 +435,9 @@ export default function AutoBookProvider({
               date: bookingDate,
             });
             if (!isCloseEnough(offer.start, config.maxMinutesFromNow)) {
-              lastSkipMsg = `${name}: offer at ${formatTime(offer.start.time)} too far`;
-              firstSkipMsg ??= lastSkipMsg;
-              skippedCount++;
+              const offerReason = `offer at ${formatTime(offer.start.time)} too far`;
+              skipsThisCycle.set(experience.id, offerReason);
+              firstSkipMsg ??= `${name}: ${offerReason}`;
               continue;
             }
             const booking = config.dryRun
@@ -505,31 +500,39 @@ export default function AutoBookProvider({
               error instanceof OfferError ||
               error?.response?.status === 410
             ) {
-              lastSkipMsg = `${name}: offer unavailable`;
-              firstSkipMsg ??= lastSkipMsg;
-              skippedCount++;
+              skipsThisCycle.set(experience.id, 'offer unavailable');
+              firstSkipMsg ??= `${name}: offer unavailable`;
               continue;
             }
             throw error;
           }
         }
 
+        const skippedCount = skipsThisCycle.size;
         const finalMsg = firstSkipMsg
           ? `${skippedCount}/${experiences.length} skipped — ${firstSkipMsg}`
           : allBooked
             ? 'All targets booked'
             : 'No targets currently available';
         safeSetStatus({ lastChecked, message: finalMsg, running: true });
-        if (lastSkipMsg && firstSkipMsg !== lastSkipWebhookMsgRef.current) {
-          lastSkipWebhookMsgRef.current = firstSkipMsg;
-          consecutiveSameSkipCountRef.current = isPermSkip(firstSkipMsg) ? 1 : 0;
-          sendWebhook(config.webhookUrl, {
-            type: 'skip',
-            firstSkipReason: firstSkipMsg ?? 'Unknown reason',
-            skippedCount,
-            totalTargets: experiences.length,
-          }).catch(console.error);
-        } else if (firstSkipMsg && isPermSkip(firstSkipMsg)) {
+        // Send per-ride skip webhooks only when the reason changes
+        for (const [id, reason] of skipsThisCycle) {
+          if (lastSkipReasonsRef.current.get(id) !== reason) {
+            lastSkipReasonsRef.current.set(id, reason);
+            const expName = experiences.find(e => e.id === id)?.name ?? `Ride (...${id.slice(-4)})`;
+            sendWebhook(config.webhookUrl, {
+              type: 'skip',
+              experienceName: expName,
+              reason,
+            }).catch(console.error);
+          }
+        }
+        // Clear stale entries for rides no longer skipped
+        Array.from(lastSkipReasonsRef.current.keys())
+          .filter((id: string) => !skipsThisCycle.has(id))
+          .forEach((id: string) => lastSkipReasonsRef.current.delete(id));
+        // Auto-stop on consecutive permanent eligibility failures
+        if (firstSkipMsg && isPermSkip(firstSkipMsg)) {
           consecutiveSameSkipCountRef.current++;
           if (consecutiveSameSkipCountRef.current >= 5) {
             stopAutoBooker(
