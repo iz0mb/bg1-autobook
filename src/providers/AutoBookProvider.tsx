@@ -445,6 +445,7 @@ export default function AutoBookProvider({
               : await ll.book(offer);
             if (config.dryRun) {
               dryRunBookedIdsRef.current.add(booking.experience.id);
+              dryRunUpgradeTimesRef.current.set(booking.experience.id, booking.start.time);
             } else {
               refreshPlans();
             }
@@ -604,8 +605,50 @@ export default function AutoBookProvider({
               continue;
             }
           }
+          // Dry run: check dry-run-booked rides for upgrades using a fresh offer
+          if (config.dryRun) {
+            for (const id of dryRunBookedIdsRef.current) {
+              if (cancelled) break;
+              if (!targetIds.has(id)) continue;
+              const currentTime = dryRunUpgradeTimesRef.current.get(id);
+              if (!currentTime) continue;
+              const exp = allExps.find(e => e.id === id);
+              if (!exp) continue;
+              let upGuests: Guest[] = [];
+              try {
+                const gd = await ll.guests(exp, bookingDate);
+                upGuests = gd.eligible.length > 0
+                  ? gd.eligible.slice(0, ll.rules.maxPartySize)
+                  : (gd.ineligible as unknown as Guest[]).slice(0, ll.rules.maxPartySize);
+              } catch { continue; }
+              if (upGuests.length === 0) continue;
+              try {
+                const offer = await ll.offer(exp, upGuests, { date: bookingDate });
+                if (
+                  +offer.start.time < +currentTime &&
+                  isCloseEnough(offer.start, config.maxMinutesFromNow)
+                ) {
+                  dryRunUpgradeTimesRef.current.set(exp.id, offer.start.time);
+                  await sendWebhook(config.webhookUrl, {
+                    type: 'upgraded',
+                    experienceName: '[DRY RUN] ' + exp.name,
+                    startTime: offer.start.time.toString(),
+                    oldTime: currentTime.toString(),
+                    date: offer.start.date,
+                    guestCount: upGuests.length,
+                    guestNames: upGuests.map(g => g.name),
+                  });
+                  safeSetStatus({
+                    lastChecked,
+                    message: `[DRY RUN] Upgraded ${exp.name} to ${formatTime(offer.start.time)} (was ${formatTime(currentTime)})`,
+                    running: true,
+                  });
+                  break;
+                }
+              } catch { continue; }
+            }
+          }
         }
-      } catch (error: any) {
         console.error(error);
         if (error?.name === 'RateLimitExceeded') {
           safeSetStatus({
