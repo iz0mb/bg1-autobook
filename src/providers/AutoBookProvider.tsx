@@ -50,6 +50,7 @@ type WebhookEvent =
       startTime: string;
       date: string;
       guestCount: number;
+      guestNames: string[];
       remaining: number;
       remainingNames: string[];
     }
@@ -60,6 +61,7 @@ type WebhookEvent =
       oldTime: string;
       date: string;
       guestCount: number;
+      guestNames: string[];
     }
   | { type: 'ticket_issue'; reason: IneligibleReason; parkName: string; date: string }
   | { type: 'skip'; firstSkipReason: string; skippedCount: number; totalTargets: number }
@@ -96,7 +98,7 @@ async function sendWebhook(url: string, event: WebhookEvent) {
       fields.push(
         { name: 'Time', value: formatTime(event.startTime), inline: true },
         { name: 'Date', value: event.date, inline: true },
-        { name: 'Guests', value: String(event.guestCount), inline: true }
+        { name: `Guests (${event.guestCount})`, value: event.guestNames.join('\n'), inline: false }
       );
       if (event.remaining > 0) {
         fields.push({
@@ -116,7 +118,7 @@ async function sendWebhook(url: string, event: WebhookEvent) {
         { name: 'New Time', value: formatTime(event.startTime), inline: true },
         { name: 'Previous', value: formatTime(event.oldTime), inline: true },
         { name: 'Date', value: event.date, inline: true },
-        { name: 'Guests', value: String(event.guestCount), inline: true }
+        { name: `Guests (${event.guestCount})`, value: event.guestNames.join('\n'), inline: false }
       );
       break;
     case 'ticket_issue':
@@ -465,6 +467,7 @@ export default function AutoBookProvider({
               startTime: booking.start.time.toString(),
               date: booking.start.date,
               guestCount: booking.guests.length,
+              guestNames: (booking.guests as Guest[]).map(g => g.name),
               remaining,
               remainingNames,
             });
@@ -582,6 +585,7 @@ export default function AutoBookProvider({
                   oldTime: effectiveBookingTime.toString(),
                   date: upgraded.start.date,
                   guestCount: upgraded.guests.length,
+                  guestNames: (upgraded.guests as Guest[]).map(g => g.name),
                 });
                 safeSetStatus({
                   lastChecked,
