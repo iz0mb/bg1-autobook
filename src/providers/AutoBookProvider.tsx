@@ -2,6 +2,7 @@ import { use, useCallback, useEffect, useRef, useState } from 'react';
 
 import { isLLMP } from '@/api/itinerary';
 import { FlexExperience, Guest, IneligibleReason, OfferError, OfferExperience } from '@/api/ll';
+import useFlash from '@/hooks/useFlash';
 import AutoBookContext, {
   AUTO_BOOK_KEY,
   AutoBookConfig,
@@ -76,6 +77,7 @@ export default function AutoBookProvider({
   const { park } = use(ParkContext);
   const { bookingDate } = use(BookingDateContext);
   const { plans, refreshPlans } = use(PlansContext);
+  const [flashElem, flash] = useFlash();
   const [config, setConfig] = useState(loadConfig);
   const [status, setStatus] = useState<AutoBookStatus>({
     message: config.enabled ? 'Starting' : 'Off',
@@ -183,14 +185,12 @@ export default function AutoBookProvider({
             continue;
           }
           if (ticketIssue) {
-            setStatus({
-              lastChecked,
-              message:
-                ticketIssue === 'INVALID_PARK_ADMISSION'
-                  ? 'No valid park ticket'
-                  : 'Park reservation needed',
-              running: false,
-            });
+            const msg =
+              ticketIssue === 'INVALID_PARK_ADMISSION'
+                ? 'No valid park ticket'
+                : 'Park reservation needed';
+            setStatus({ lastChecked, message: msg, running: false });
+            flash(msg, 'error');
             return;
           }
           if (guests.length === 0) continue;
@@ -269,6 +269,7 @@ export default function AutoBookProvider({
   return (
     <AutoBookContext value={{ config, saveConfig, status }}>
       {children}
+      {flashElem}
     </AutoBookContext>
   );
 }
