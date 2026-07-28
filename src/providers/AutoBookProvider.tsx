@@ -225,6 +225,7 @@ export default function AutoBookProvider({
       }
       programmaticStopRef.current = false;
       wasEnabledRef.current = false;
+      startWebhookFingerprint.current = null;
       setStatus(status => ({
         ...status,
         message: status.message.startsWith('Booked ') ? status.message : 'Off',
