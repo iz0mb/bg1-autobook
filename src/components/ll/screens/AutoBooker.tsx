@@ -123,7 +123,7 @@ export default function AutoBooker() {
           />
           Auto book matching Lightning Lanes
         </label>
-        <label className="flex items-center gap-x-2 mt-2 text-sm">
+        <label className="flex items-center gap-x-2 mt-2 font-semibold">
           <input
             type="checkbox"
             checked={draft.upgradeExisting}
