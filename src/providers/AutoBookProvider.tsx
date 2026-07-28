@@ -61,7 +61,8 @@ type WebhookEvent =
     }
   | { type: 'ticket_issue'; reason: IneligibleReason }
   | { type: 'skip'; message: string }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'stopped'; reason: string };
 
 async function sendWebhook(url: string, event: WebhookEvent) {
   if (!url.trim()) return;
@@ -114,6 +115,11 @@ async function sendWebhook(url: string, event: WebhookEvent) {
       title = '❌ Auto Book Error — Polling Stopped';
       description = event.message;
       color = 0xed4245;
+      break;
+    case 'stopped':
+      title = '⏹️ Auto Book Stopped';
+      description = event.reason;
+      color = 0x99aab5;
       break;
   }
 
@@ -222,6 +228,14 @@ export default function AutoBookProvider({
       if (!cancelled) setStatus(s);
     };
 
+    const stopAutoBooker = (reason: string) => {
+      if (cancelled) return;
+      saveConfig({ ...config, enabled: false });
+      sendWebhook(config.webhookUrl, { type: 'stopped', reason }).catch(
+        console.error
+      );
+    };
+
     async function checkOnce() {
       if (checking.current || cancelled) return;
       checking.current = true;
@@ -317,6 +331,7 @@ export default function AutoBookProvider({
               type: 'ticket_issue',
               reason: ticketIssue,
             }).catch(console.error);
+            stopAutoBooker(msg);
             return;
           }
           if (guests.length === 0) continue;
@@ -346,14 +361,9 @@ export default function AutoBookProvider({
               date: booking.start.date,
               guestCount: booking.guests.length,
             });
-            saveConfig({ ...config, enabled: false });
-            safeSetStatus({
-              lastChecked,
-              message: `Booked ${booking.experience.name} for ${formatTime(
-                booking.start.time
-              )}`,
-              running: false,
-            });
+            const bookedMsg = `Booked ${booking.experience.name} for ${formatTime(booking.start.time)}`;
+            safeSetStatus({ lastChecked, message: bookedMsg, running: false });
+            stopAutoBooker(bookedMsg);
             return;
           } catch (error: any) {
             if (
@@ -447,6 +457,7 @@ export default function AutoBookProvider({
           type: 'error',
           message: errMsg,
         }).catch(console.error);
+        stopAutoBooker(`Error: ${errMsg}`);
       } finally {
         checking.current = false;
       }
