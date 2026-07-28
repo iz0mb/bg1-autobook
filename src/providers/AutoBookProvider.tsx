@@ -497,9 +497,9 @@ export default function AutoBookProvider({
           }).catch(console.error);
         } else if (firstSkipMsg && permanentSkipsOnly) {
           consecutiveSameSkipCountRef.current++;
-          if (consecutiveSameSkipCountRef.current >= 10) {
+          if (consecutiveSameSkipCountRef.current >= 5) {
             stopAutoBooker(
-              `Auto-stopped: ${firstSkipMsg} (10 consecutive cycles)`
+              `Auto-stopped: ${firstSkipMsg} (5 consecutive cycles)`
             );
             return;
           }
