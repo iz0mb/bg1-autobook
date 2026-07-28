@@ -20,11 +20,11 @@ export default function Merlock() {
           <ParkProvider>
             <ExperiencesProvider>
               <RebookingProvider>
-                <NavProvider>
-                  <AutoBookProvider>
+                <AutoBookProvider>
+                  <NavProvider>
                     <Home tabName={tabName} />
-                  </AutoBookProvider>
-                </NavProvider>
+                  </NavProvider>
+                </AutoBookProvider>
               </RebookingProvider>
             </ExperiencesProvider>
           </ParkProvider>
