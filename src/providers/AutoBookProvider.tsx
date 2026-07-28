@@ -51,6 +51,7 @@ type WebhookEvent =
       guestCount: number;
     }
   | { type: 'ticket_issue'; reason: IneligibleReason }
+  | { type: 'skip'; message: string }
   | { type: 'error'; message: string };
 
 async function sendWebhook(url: string, event: WebhookEvent) {
@@ -83,6 +84,11 @@ async function sendWebhook(url: string, event: WebhookEvent) {
           ? 'No valid park ticket found for any party member'
           : 'Park reservation required but not found';
       color = 0xfee75c;
+      break;
+    case 'skip':
+      title = '⏭️ Target Skipped';
+      description = event.message;
+      color = 0xffa500;
       break;
     case 'error':
       title = '❌ Auto Book Error — Polling Stopped';
@@ -190,6 +196,8 @@ export default function AutoBookProvider({
       config.targetIds.map((id, index) => [id, index])
     );
 
+    let lastSkipWebhookMsg: string | null = null;
+
     async function checkOnce() {
       if (checking.current || cancelled) return;
       checking.current = true;
@@ -208,15 +216,31 @@ export default function AutoBookProvider({
               (targetOrder.get(b.id) ?? Infinity)
           );
 
+        if (experiences.length === 0) {
+          setStatus({
+            lastChecked,
+            message: `No targets in list (${config.targetIds.length} configured)`,
+            running: true,
+          });
+          return;
+        }
+
+        let lastSkipMsg: string | null = null;
+
         for (const experience of experiences) {
-          if (
-            experience.flex.nextAvailableTime &&
-            !isCloseEnough(
-              { date: bookingDate, time: experience.flex.nextAvailableTime },
-              config.maxMinutesFromNow
-            )
-          ) {
-            continue;
+          const name = experience.name;
+
+          if (experience.flex.nextAvailableTime) {
+            const nextTime = experience.flex.nextAvailableTime;
+            if (
+              !isCloseEnough(
+                { date: bookingDate, time: nextTime },
+                config.maxMinutesFromNow
+              )
+            ) {
+              lastSkipMsg = `${name}: next slot ${formatTime(nextTime)} too far`;
+              continue;
+            }
           }
 
           let guests: Guest[] = [];
@@ -225,16 +249,23 @@ export default function AutoBookProvider({
             const guestData = await ll.guests(experience, bookingDate);
             guests = guestData.eligible.slice(0, ll.rules.maxPartySize);
             if (guests.length === 0) {
-              const reason = guestData.ineligible[0]?.ineligibleReason;
+              const raw = guestData.ineligible[0]?.ineligibleReason;
+              const reason: IneligibleReason | undefined =
+                typeof raw === 'object' && raw !== null
+                  ? (raw as any).ineligibleReason
+                  : raw;
               if (
                 reason === 'INVALID_PARK_ADMISSION' ||
                 reason === 'PARK_RESERVATION_NEEDED'
               ) {
                 ticketIssue = reason;
+              } else {
+                lastSkipMsg = `${name}: no eligible guests (${reason ?? 'unknown'})`;
               }
             }
-          } catch (error) {
+          } catch (error: any) {
             console.error(error);
+            lastSkipMsg = `${name}: guests call failed (${error?.name ?? 'error'})`;
             continue;
           }
           if (ticketIssue) {
@@ -252,11 +283,7 @@ export default function AutoBookProvider({
           }
           if (guests.length === 0) continue;
           if (!hasAvailableSlot(guests)) {
-            setStatus({
-              lastChecked,
-              message: 'Party already has 3 active LLs',
-              running: true,
-            });
+            lastSkipMsg = `${name}: party has 3 active LLs`;
             continue;
           }
 
@@ -265,6 +292,7 @@ export default function AutoBookProvider({
               date: bookingDate,
             });
             if (!isCloseEnough(offer.start, config.maxMinutesFromNow)) {
+              lastSkipMsg = `${name}: offer at ${formatTime(offer.start.time)} too far`;
               continue;
             }
             const booking = await ll.book(offer);
@@ -290,19 +318,22 @@ export default function AutoBookProvider({
               error instanceof OfferError ||
               error?.response?.status === 410
             ) {
+              lastSkipMsg = `${name}: offer unavailable`;
               continue;
             }
             throw error;
           }
         }
 
-        setStatus({
-          lastChecked,
-          message: experiences.length
-            ? 'No matching slot yet'
-            : 'No targets available',
-          running: true,
-        });
+        const finalMsg = lastSkipMsg ?? 'No targets available';
+        setStatus({ lastChecked, message: finalMsg, running: true });
+        if (lastSkipMsg && lastSkipMsg !== lastSkipWebhookMsg) {
+          lastSkipWebhookMsg = lastSkipMsg;
+          sendWebhook(config.webhookUrl, {
+            type: 'skip',
+            message: lastSkipMsg,
+          }).catch(console.error);
+        }
       } catch (error: any) {
         console.error(error);
         const errMsg = error?.message ?? error?.name ?? 'Auto-book check failed';
