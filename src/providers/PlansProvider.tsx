@@ -27,6 +27,12 @@ export default function PlansProvider({
 
   useEffect(refreshPlans, [refreshPlans]);
 
+  // Periodically refresh plans so the auto-booker detects freed LL slots promptly
+  useEffect(() => {
+    const id = setInterval(() => refreshPlans(), 30_000);
+    return () => clearInterval(id);
+  }, [refreshPlans]);
+
   return (
     <PlansContext value={{ plans, plansLoaded, refreshPlans, loaderElem }}>
       {children}

@@ -369,6 +369,14 @@ export default function AutoBookProvider({
             }
           }
 
+          // Short-circuit: skip API calls if all known guests are already at the 3-LL cap
+          if (!config.dryRun &&
+              bookingCountByGuestId.size > 0 &&
+              Array.from(bookingCountByGuestId.values()).every((c: number) => c >= 3)) {
+            skipsThisCycle.set(experience.id, 'party has 3 active LLs');
+            firstSkipMsg ??= `${name}: party has 3 active LLs`;
+            continue;
+          }
           let guests: Guest[] = [];
           let ticketIssue: IneligibleReason | undefined;
           try {
