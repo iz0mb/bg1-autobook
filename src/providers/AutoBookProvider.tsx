@@ -42,6 +42,9 @@ function isCloseEnough(
   return secondsFromNow >= 0 && secondsFromNow <= maxMinutes * 60;
 }
 
+const randMs = (min: number, max: number) => min + Math.floor(Math.random() * (max - min));
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
 type WebhookEvent =
   | { type: 'started'; parkName: string; date: string; targetNames: string[]; intervalSeconds: number; maxMinutesFromNow: number; upgradeExisting: boolean }
   | {
@@ -380,6 +383,7 @@ export default function AutoBookProvider({
           let guests: Guest[] = [];
           let ticketIssue: IneligibleReason | undefined;
           try {
+            await sleep(randMs(150, 500));
             const guestData = await ll.guests(experience, bookingDate);
             guests = guestData.eligible.slice(0, ll.rules.maxPartySize);
             if (guests.length === 0) {
@@ -439,6 +443,7 @@ export default function AutoBookProvider({
           }
 
           try {
+            await sleep(randMs(200, 600));
             const offer = await ll.offer(experience, guests, {
               date: bookingDate,
             });
@@ -567,6 +572,7 @@ export default function AutoBookProvider({
               if (!exp) continue;
               let upGuests: Guest[] = [];
               try {
+                await sleep(randMs(150, 500));
                 const gd = await ll.guests(exp, bookingDate);
                 upGuests = gd.eligible.slice(0, ll.rules.maxPartySize);
               } catch {
@@ -574,6 +580,7 @@ export default function AutoBookProvider({
               }
               if (upGuests.length === 0) continue;
               try {
+                await sleep(randMs(200, 600));
                 const offer = await ll.offer(exp, upGuests, {
                   booking: existingBooking,
                 });
@@ -615,6 +622,7 @@ export default function AutoBookProvider({
               if (!exp) continue;
               let upGuests: Guest[] = [];
               try {
+                await sleep(randMs(150, 500));
                 const gd = await ll.guests(exp, bookingDate);
                 upGuests = gd.eligible.length > 0
                   ? gd.eligible.slice(0, ll.rules.maxPartySize)
@@ -622,6 +630,7 @@ export default function AutoBookProvider({
               } catch { continue; }
               if (upGuests.length === 0) continue;
               try {
+                await sleep(randMs(200, 600));
                 const offer = await ll.offer(exp, upGuests, { date: bookingDate });
                 if (
                   +offer.start.time < +currentTime &&
@@ -648,6 +657,7 @@ export default function AutoBookProvider({
             }
           }
         }
+      } catch (error: any) {
         console.error(error);
         if (error?.name === 'RateLimitExceeded') {
           safeSetStatus({
@@ -675,10 +685,20 @@ export default function AutoBookProvider({
     }
 
     checkOnce();
-    const intervalId = setInterval(checkOnce, config.intervalSeconds * 1000);
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const scheduleNext = () => {
+      if (cancelled) return;
+      const base = config.intervalSeconds * 1000;
+      const delay = randMs(Math.round(base * 0.75), Math.round(base * 1.25));
+      timeoutId = setTimeout(async () => {
+        await checkOnce();
+        scheduleNext();
+      }, delay);
+    };
+    scheduleNext();
     return () => {
       cancelled = true;
-      clearInterval(intervalId);
+      clearTimeout(timeoutId);
     };
   }, [bookingDate, config, ll, park, plans, refreshPlans, saveConfig]);
 
