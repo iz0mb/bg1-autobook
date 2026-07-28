@@ -5,6 +5,7 @@ export const AUTO_BOOK_KEY = 'bg1.ll.autoBook';
 export interface AutoBookConfig {
   enabled: boolean;
   intervalSeconds: number;
+  jitterPercent: number;
   maxMinutesFromNow: number;
   targetIds: string[];
   webhookUrl: string;
@@ -27,6 +28,7 @@ export interface AutoBookContextValue {
 export const DEFAULT_AUTO_BOOK_CONFIG: AutoBookConfig = {
   enabled: false,
   intervalSeconds: 3,
+  jitterPercent: 25,
   maxMinutesFromNow: 120,
   targetIds: [],
   webhookUrl: '',

@@ -23,6 +23,7 @@ function loadConfig(): AutoBookConfig {
     ...config,
     targetIds: Array.isArray(config.targetIds) ? config.targetIds : [],
     intervalSeconds: Math.max(1, Math.min(30, config.intervalSeconds ?? 3)),
+    jitterPercent: Math.max(0, Math.min(100, config.jitterPercent ?? 25)),
     maxMinutesFromNow: Math.max(1, config.maxMinutesFromNow ?? 120),
     webhookUrl: typeof config.webhookUrl === 'string' ? config.webhookUrl : '',
     upgradeExisting: config.upgradeExisting === true,
@@ -208,6 +209,7 @@ export default function AutoBookProvider({
     newConfig = {
       ...newConfig,
       intervalSeconds: Math.max(1, Math.min(30, newConfig.intervalSeconds)),
+      jitterPercent: Math.max(0, Math.min(100, newConfig.jitterPercent)),
       maxMinutesFromNow: Math.max(1, newConfig.maxMinutesFromNow),
     };
     kvdb.set<AutoBookConfig>(AUTO_BOOK_KEY, newConfig);
@@ -689,7 +691,10 @@ export default function AutoBookProvider({
     const scheduleNext = () => {
       if (cancelled) return;
       const base = config.intervalSeconds * 1000;
-      const delay = randMs(Math.round(base * 0.75), Math.round(base * 1.25));
+      const j = (config.jitterPercent ?? 25) / 100;
+      const delay = j > 0
+        ? randMs(Math.round(base * (1 - j)), Math.round(base * (1 + j)))
+        : base;
       timeoutId = setTimeout(async () => {
         await checkOnce();
         scheduleNext();

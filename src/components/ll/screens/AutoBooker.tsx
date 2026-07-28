@@ -30,6 +30,7 @@ function loadSavedAutoBookConfig(config: AutoBookConfig): AutoBookConfig {
       ...saved,
       targetIds: Array.isArray(saved.targetIds) ? saved.targetIds : [],
       intervalSeconds: Number(saved.intervalSeconds) || config.intervalSeconds,
+      jitterPercent: saved.jitterPercent != null ? Math.max(0, Math.min(100, Number(saved.jitterPercent) || 0)) : config.jitterPercent,
       maxMinutesFromNow:
         Number(saved.maxMinutesFromNow) || config.maxMinutesFromNow,
       webhookUrl: typeof saved.webhookUrl === 'string' ? saved.webhookUrl : '',
@@ -89,6 +90,7 @@ export default function AutoBooker() {
       ...draft,
       targetIds: Array.isArray(draft.targetIds) ? draft.targetIds : [],
       intervalSeconds: Number(draft.intervalSeconds) || 3,
+      jitterPercent: Math.max(0, Math.min(100, Number(draft.jitterPercent) || 0)),
       maxMinutesFromNow: Number(draft.maxMinutesFromNow) || 120,
       webhookUrl: draft.webhookUrl || '',
       enabled: !!draft.enabled,
@@ -185,6 +187,22 @@ export default function AutoBooker() {
               update({ maxMinutesFromNow: Number(event.currentTarget.value) })
             }
           />
+        </label>
+        <label>
+          <span className="block text-xs font-semibold uppercase text-gray-500">
+            Interval jitter
+          </span>
+          <select
+            className="w-full mt-1 border rounded px-2 py-1"
+            value={draft.jitterPercent ?? 25}
+            onChange={event =>
+              update({ jitterPercent: Number(event.currentTarget.value) })
+            }
+          >
+            {[0, 10, 25, 50].map(p => (
+              <option value={p} key={p}>{p === 0 ? 'None' : `±${p}%`}</option>
+            ))}
+          </select>
         </label>
       </div>
 
