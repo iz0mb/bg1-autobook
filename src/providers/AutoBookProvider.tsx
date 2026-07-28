@@ -13,7 +13,7 @@ import BookingDateContext from '@/contexts/BookingDateContext';
 import ClientsContext from '@/contexts/ClientsContext';
 import ParkContext from '@/contexts/ParkContext';
 import PlansContext from '@/contexts/PlansContext';
-import { DateTime, formatTime, parkDate } from '@/datetime';
+import { DateTime, formatTime, parkDate, ParkTime } from '@/datetime';
 import kvdb from '@/kvdb';
 
 function loadConfig(): AutoBookConfig {
@@ -199,7 +199,7 @@ export default function AutoBookProvider({
   const lastSkipReasonsRef = useRef<Map<string, string>>(new Map());
   const consecutiveSameSkipCountRef = useRef(0);
   const dryRunBookedIdsRef = useRef<Set<string>>(new Set());
-  const dryRunUpgradeTimesRef = useRef<Map<string, any>>(new Map());
+  const dryRunUpgradeTimesRef = useRef<Map<string, ParkTime>>(new Map());
 
   const saveConfig = useCallback((newConfig: AutoBookConfig) => {
     newConfig = {
@@ -547,62 +547,53 @@ export default function AutoBookProvider({
 
         // Upgrade pass: check booked targets for earlier available slots
         if (config.upgradeExisting) {
-          const bookedTargets = currentBookings.filter(b =>
-            targetIds.has(b.experience.id)
-          );
-          for (const existingBooking of bookedTargets) {
-            if (cancelled) break;
-            const exp = allExps.find(
-              e => e.id === existingBooking.experience.id
+          if (!config.dryRun) {
+            const bookedTargets = currentBookings.filter(b =>
+              targetIds.has(b.experience.id)
             );
-            if (!exp) continue;
-            let upGuests: Guest[] = [];
-            try {
-              const gd = await ll.guests(exp, bookingDate);
-              upGuests = gd.eligible.slice(0, ll.rules.maxPartySize);
-            } catch {
-              continue;
-            }
-            if (upGuests.length === 0) continue;
-            try {
-              const offer = await ll.offer(exp, upGuests, {
-                booking: existingBooking,
-              });
-              const effectiveBookingTime = config.dryRun && dryRunUpgradeTimesRef.current.has(exp.id)
-                ? dryRunUpgradeTimesRef.current.get(exp.id)
-                : existingBooking.start.time;
-              if (
-                +offer.start.time < +effectiveBookingTime &&
-                isCloseEnough(offer.start, config.maxMinutesFromNow)
-              ) {
-                const upgraded = config.dryRun
-                  ? { experience: { id: exp.id, name: exp.name }, start: offer.start, guests: upGuests }
-                  : await ll.book(offer);
-                if (config.dryRun) {
-                  dryRunUpgradeTimesRef.current.set(exp.id, offer.start.time);
-                } else {
-                  refreshPlans();
-                }
-                await sendWebhook(config.webhookUrl, {
-                  type: 'upgraded',
-                  experienceName: (config.dryRun ? '[DRY RUN] ' : '') + upgraded.experience.name,
-                  startTime: upgraded.start.time.toString(),
-                  oldTime: effectiveBookingTime.toString(),
-                  date: upgraded.start.date,
-                  guestCount: upgraded.guests.length,
-                  guestNames: (upgraded.guests as Guest[]).map(g => g.name),
-                });
-                safeSetStatus({
-                  lastChecked,
-                  message: `${config.dryRun ? '[DRY RUN] ' : ''}Upgraded ${upgraded.experience.name} to ${
-                    formatTime(upgraded.start.time)
-                  } (was ${formatTime(effectiveBookingTime)})`,
-                  running: true,
-                });
-                break;
+            for (const existingBooking of bookedTargets) {
+              if (cancelled) break;
+              const exp = allExps.find(
+                e => e.id === existingBooking.experience.id
+              );
+              if (!exp) continue;
+              let upGuests: Guest[] = [];
+              try {
+                const gd = await ll.guests(exp, bookingDate);
+                upGuests = gd.eligible.slice(0, ll.rules.maxPartySize);
+              } catch {
+                continue;
               }
-            } catch {
-              continue;
+              if (upGuests.length === 0) continue;
+              try {
+                const offer = await ll.offer(exp, upGuests, {
+                  booking: existingBooking,
+                });
+                if (
+                  +offer.start.time < +existingBooking.start.time &&
+                  isCloseEnough(offer.start, config.maxMinutesFromNow)
+                ) {
+                  const upgraded = await ll.book(offer);
+                  refreshPlans();
+                  await sendWebhook(config.webhookUrl, {
+                    type: 'upgraded',
+                    experienceName: upgraded.experience.name,
+                    startTime: upgraded.start.time.toString(),
+                    oldTime: existingBooking.start.time.toString(),
+                    date: upgraded.start.date,
+                    guestCount: upgraded.guests.length,
+                    guestNames: (upgraded.guests as Guest[]).map(g => g.name),
+                  });
+                  safeSetStatus({
+                    lastChecked,
+                    message: `Upgraded ${upgraded.experience.name} to ${formatTime(upgraded.start.time)} (was ${formatTime(existingBooking.start.time)})`,
+                    running: true,
+                  });
+                  break;
+                }
+              } catch {
+                continue;
+              }
             }
           }
           // Dry run: check dry-run-booked rides for upgrades using a fresh offer
