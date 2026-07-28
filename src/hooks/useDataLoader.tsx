@@ -69,10 +69,7 @@ export default function useDataLoader(): {
               }
             } else {
               console.error(error);
-              setFlashArgs(
-                `${msgs.error}: ${error?.name ?? 'unknown'} - ${error?.message ?? String(error)}`,
-                'error'
-              );
+              setFlashArgs(msgs.error, 'error');
             }
           }
           await awaken;

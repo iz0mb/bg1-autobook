@@ -127,6 +127,40 @@ export default function AutoBooker() {
             <> at {formatTime(status.lastChecked.split('T')[1] ?? '')}</>
           )}
         </p>
+        <p className="mt-1 text-xs text-gray-400 font-mono break-all">
+          cfg: enabled={String(config.enabled)} targets=
+          {config.targetIds.length} draft: enabled={String(draft.enabled)}{' '}
+          targets={draft.targetIds.length}
+        </p>
+        <p className="mt-1 text-xs text-gray-400 font-mono break-all">
+          ls: {localStorage.getItem('bg1.ll.autoBook')?.slice(0, 120) ?? 'null'}
+        </p>
+        {draft.webhookUrl ? (
+          <button
+            className="mt-2 text-xs underline text-blue-600"
+            onClick={() => {
+              fetch(draft.webhookUrl.trim(), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  embeds: [
+                    {
+                      title: '🔧 Webhook Test',
+                      description: 'bg1 Auto Book webhook is working!',
+                      color: 0x5865f2,
+                      timestamp: new Date().toISOString(),
+                      footer: { text: 'bg1 Auto Book' },
+                    },
+                  ],
+                }),
+              })
+                .then(() => alert('Webhook sent!'))
+                .catch(e => alert('Webhook failed: ' + String(e)));
+            }}
+          >
+            Test webhook
+          </button>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-2 gap-3 mt-2">
