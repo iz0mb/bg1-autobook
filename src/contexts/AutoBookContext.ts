@@ -9,6 +9,7 @@ export interface AutoBookConfig {
   targetIds: string[];
   webhookUrl: string;
   upgradeExisting: boolean;
+  dryRun: boolean;
 }
 
 export interface AutoBookStatus {
@@ -30,6 +31,7 @@ export const DEFAULT_AUTO_BOOK_CONFIG: AutoBookConfig = {
   targetIds: [],
   webhookUrl: '',
   upgradeExisting: false,
+  dryRun: false,
 };
 
 export default createContext<AutoBookContextValue>({

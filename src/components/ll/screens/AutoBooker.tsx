@@ -35,6 +35,7 @@ function loadSavedAutoBookConfig(config: AutoBookConfig): AutoBookConfig {
       webhookUrl: typeof saved.webhookUrl === 'string' ? saved.webhookUrl : '',
       enabled: !!saved.enabled,
       upgradeExisting: saved.upgradeExisting === true,
+      dryRun: saved.dryRun === true,
     };
   } catch {
     return config;
@@ -92,6 +93,7 @@ export default function AutoBooker() {
       webhookUrl: draft.webhookUrl || '',
       enabled: !!draft.enabled,
       upgradeExisting: !!draft.upgradeExisting,
+      dryRun: !!draft.dryRun,
     };
 
     localStorage.setItem(AUTO_BOOK_KEY, JSON.stringify(cleanDraft));
@@ -132,6 +134,14 @@ export default function AutoBooker() {
             }
           />
           Upgrade existing bookings to earlier times
+        </label>
+        <label className="flex items-center gap-x-2 mt-2 font-semibold text-orange-600">
+          <input
+            type="checkbox"
+            checked={draft.dryRun}
+            onChange={event => update({ dryRun: event.currentTarget.checked })}
+          />
+          Dry run — simulate bookings, no real reservations
         </label>
         <p className="mt-2 text-sm text-gray-600">
           Status: {status.message}

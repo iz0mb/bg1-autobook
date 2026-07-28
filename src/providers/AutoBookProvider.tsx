@@ -282,7 +282,7 @@ export default function AutoBookProvider({
       if (checking.current || cancelled) return;
       checking.current = true;
       const lastChecked = DateTime.now().toString();
-      safeSetStatus({ lastChecked, message: 'Checking', running: true });
+      safeSetStatus({ lastChecked, message: config.dryRun ? '[DRY RUN] Checking' : 'Checking', running: true });
 
       try {
         const targetIds = new Set(config.targetIds);
@@ -430,8 +430,10 @@ export default function AutoBookProvider({
               skippedCount++;
               continue;
             }
-            const booking = await ll.book(offer);
-            refreshPlans();
+            const booking = config.dryRun
+              ? { experience: { id: experience.id, name: experience.name }, start: offer.start, guests }
+              : await ll.book(offer);
+            if (!config.dryRun) refreshPlans();
             const justBookedIds = new Set([...bookedIds, booking.experience.id]);
             const remaining = config.targetIds.filter(
               id => !justBookedIds.has(id)
@@ -441,7 +443,7 @@ export default function AutoBookProvider({
               .map(id => allExps.find(e => e.id === id)?.name ?? `Ride (...${id.slice(-4)})`);
             await sendWebhook(config.webhookUrl, {
               type: 'booked',
-              experienceName: booking.experience.name,
+              experienceName: (config.dryRun ? '[DRY RUN] ' : '') + booking.experience.name,
               startTime: booking.start.time.toString(),
               date: booking.start.date,
               guestCount: booking.guests.length,
@@ -449,6 +451,11 @@ export default function AutoBookProvider({
               remainingNames,
             });
             const bookedMsg = `Booked ${booking.experience.name} for ${formatTime(booking.start.time)}`;
+            if (config.dryRun) {
+              safeSetStatus({ lastChecked, message: `[DRY RUN] ${bookedMsg}`, running: false });
+              stopAutoBooker('[DRY RUN] Simulated booking — no actual reservation was made');
+              return;
+            }
             if (remaining === 0 && !config.upgradeExisting) {
               safeSetStatus({ lastChecked, message: bookedMsg, running: false });
               stopAutoBooker('All targets booked! Last: ' + bookedMsg);
@@ -531,11 +538,13 @@ export default function AutoBookProvider({
                 +offer.start.time < +existingBooking.start.time &&
                 isCloseEnough(offer.start, config.maxMinutesFromNow)
               ) {
-                const upgraded = await ll.book(offer);
-                refreshPlans();
+                const upgraded = config.dryRun
+                  ? { experience: { id: exp.id, name: exp.name }, start: offer.start, guests: upGuests }
+                  : await ll.book(offer);
+                if (!config.dryRun) refreshPlans();
                 await sendWebhook(config.webhookUrl, {
                   type: 'upgraded',
-                  experienceName: upgraded.experience.name,
+                  experienceName: (config.dryRun ? '[DRY RUN] ' : '') + upgraded.experience.name,
                   startTime: upgraded.start.time.toString(),
                   oldTime: existingBooking.start.time.toString(),
                   date: upgraded.start.date,
@@ -543,11 +552,14 @@ export default function AutoBookProvider({
                 });
                 safeSetStatus({
                   lastChecked,
-                  message: `Upgraded ${upgraded.experience.name} to ${
+                  message: `${config.dryRun ? '[DRY RUN] ' : ''}Upgraded ${upgraded.experience.name} to ${
                     formatTime(upgraded.start.time)
                   } (was ${formatTime(existingBooking.start.time)})`,
                   running: true,
                 });
+                if (config.dryRun) {
+                  stopAutoBooker('[DRY RUN] Simulated upgrade \u2014 no actual modification was made');
+                }
                 break;
               }
             } catch {
