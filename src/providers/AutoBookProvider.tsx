@@ -343,9 +343,7 @@ export default function AutoBookProvider({
         let skippedCount = 0;
         const isPermSkip = (m: string | null) =>
           !!m &&
-          (m.includes('tier limit') ||
-            m.includes('no eligible guests') ||
-            m.includes('3 active LLs'));
+          (m.includes('tier limit') || m.includes('no eligible guests'));
 
         for (const experience of experiences) {
           const name = experience.name;
