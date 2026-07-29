@@ -168,7 +168,7 @@ export default function AutoBooker() {
         <p className="mt-2 text-sm text-gray-600">
           Status: {status.message}
           {status.lastChecked && (
-            <> at {formatTime(status.lastChecked.split('T')[1] ?? '')}</>
+            <><br />Last checked: {formatTime(status.lastChecked.split('T')[1] ?? '')}</>
           )}
         </p>
       </div>

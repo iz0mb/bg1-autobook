@@ -72,7 +72,8 @@ type WebhookEvent =
   | { type: 'ticket_issue'; reason: IneligibleReason; parkName: string; date: string }
   | { type: 'skip'; experienceName: string; reason: string }
   | { type: 'error'; message: string; parkName: string; date: string }
-  | { type: 'stopped'; reason: string; parkName: string; date: string };
+  | { type: 'stopped'; reason: string; parkName: string; date: string }
+  | { type: 'scheduled'; parkName: string; date: string; opensAt: string; targetCount: number };
 
 async function sendWebhook(url: string, event: WebhookEvent) {
   if (!url.trim()) return;
@@ -163,6 +164,15 @@ async function sendWebhook(url: string, event: WebhookEvent) {
         { name: 'Date', value: event.date, inline: true }
       );
       break;
+    case 'scheduled':
+      title = '🕐 Auto Book Scheduled';
+      description = `**${event.parkName}** on **${event.date}**`;
+      color = 0x5865f2;
+      fields.push(
+        { name: 'Booking Window Opens', value: event.opensAt, inline: false },
+        { name: 'Rides Queued', value: `${event.targetCount}`, inline: true }
+      );
+      break;
   }
 
   await fetch(url.trim(), {
@@ -201,6 +211,7 @@ export default function AutoBookProvider({
   });
   const checking = useRef(false);
   const startWebhookFingerprint = useRef<string | null>(null);
+  const scheduledWebhookFingerprintRef = useRef<string | null>(null);
   const programmaticStopRef = useRef(false);
   const wasEnabledRef = useRef(config.enabled);
   const lastSkipReasonsRef = useRef<Map<string, string>>(new Map());
@@ -232,6 +243,7 @@ export default function AutoBookProvider({
       programmaticStopRef.current = false;
       wasEnabledRef.current = false;
       startWebhookFingerprint.current = null;
+      scheduledWebhookFingerprintRef.current = null;
       setStatus(status => ({
         ...status,
         message: status.message.startsWith('Booked ') ? status.message : 'Off',
@@ -315,9 +327,24 @@ export default function AutoBookProvider({
 
       if (notYetEligible) {
         const tzLabel = isWDW ? 'EST' : 'PST';
+        const opensAt = (isWDW || config.resortGuest)
+          ? `${formatDate(eligibilityDate)} at 7:00 AM ${tzLabel}`
+          : 'Day of visit, after park check-in';
         const msg = (isWDW || config.resortGuest)
-          ? `Waiting — booking window opens ${formatDate(eligibilityDate)} at 7:00 AM ${tzLabel}`
+          ? `Waiting — booking window opens ${opensAt}`
           : `Waiting — booking available day of visit after park check-in`;
+        // Fire scheduled webhook once per unique (park, date, targets) combo
+        const scheduledFingerprint = `${park.id}:${bookingDate}:${config.targetIds.join(',')}`;
+        if (scheduledWebhookFingerprintRef.current !== scheduledFingerprint) {
+          scheduledWebhookFingerprintRef.current = scheduledFingerprint;
+          sendWebhook(config.webhookUrl, {
+            type: 'scheduled',
+            parkName: park.name,
+            date: bookingDate,
+            opensAt,
+            targetCount: config.targetIds.length,
+          }).catch(console.error);
+        }
         safeSetStatus({ lastChecked, message: msg, running: true });
         checking.current = false;
         return;
