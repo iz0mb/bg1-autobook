@@ -252,6 +252,8 @@ export default function AutoBookProvider({
         ...status,
         message: status.message.startsWith('Booked ') ? status.message : 'Off',
         running: false,
+        lastChecked: undefined,
+        waitingUntilMs: undefined,
       }));
       return;
     }

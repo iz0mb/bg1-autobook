@@ -196,7 +196,7 @@ export default function AutoBooker() {
           {countdown && (
             <span className="ml-1 font-semibold text-blue-600">({countdown})</span>
           )}
-          {status.lastChecked && (
+          {status.lastChecked && !isWaiting && (
             <><br />Last checked: {formatTime(status.lastChecked.split('T')[1] ?? '')}</>
           )}
         </p>
