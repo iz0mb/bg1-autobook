@@ -321,7 +321,7 @@ export default function AutoBookProvider({
         }
         const experiences = allExps
           .filter(exp => targetIds.has(exp.id))
-          .filter(exp => !bookedIds.has(exp.id) && !(config.dryRun && dryRunBookedIdsRef.current.has(exp.id)))
+          .filter(exp => !bookedIds.has(exp.id) && !exp.experienced && !(config.dryRun && dryRunBookedIdsRef.current.has(exp.id)))
           .sort(
             (a, b) =>
               (targetOrder.get(a.id) ?? Infinity) -
@@ -331,7 +331,10 @@ export default function AutoBookProvider({
         const allBooked =
           config.targetIds.length > 0 &&
           config.targetIds.every(
-            id => bookedIds.has(id) || (config.dryRun && dryRunBookedIdsRef.current.has(id))
+            id =>
+              bookedIds.has(id) ||
+              (config.dryRun && dryRunBookedIdsRef.current.has(id)) ||
+              !!allExps.find(e => e.id === id)?.experienced
           );
 
         if (experiences.length === 0) {
