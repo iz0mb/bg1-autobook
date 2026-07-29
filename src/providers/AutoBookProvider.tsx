@@ -13,6 +13,7 @@ import BookingDateContext from '@/contexts/BookingDateContext';
 import ClientsContext from '@/contexts/ClientsContext';
 import ParkContext from '@/contexts/ParkContext';
 import PlansContext from '@/contexts/PlansContext';
+import ResortContext from '@/contexts/ResortContext';
 import { DateTime, formatDate, formatTime, modifyDate, parkDate, ParkTime } from '@/datetime';
 import kvdb from '@/kvdb';
 
@@ -191,6 +192,7 @@ export default function AutoBookProvider({
   const { park } = use(ParkContext);
   const { bookingDate } = use(BookingDateContext);
   const { plans, refreshPlans } = use(PlansContext);
+  const resort = use(ResortContext);
   const [flashElem, flash] = useFlash();
   const [config, setConfig] = useState(loadConfig);
   const [status, setStatus] = useState<AutoBookStatus>({
@@ -294,18 +296,29 @@ export default function AutoBookProvider({
       safeSetStatus({ lastChecked, message: config.dryRun ? '[DRY RUN] Checking' : 'Checking', running: true });
 
       // Wait until the booking eligibility window opens
-      const daysAhead = config.resortGuest ? 7 : 3;
+      const isWDW = resort.id === 'WDW';
+      // DLR standard Multi Pass: same-day after park check-in (no pre-day gate, API enforces)
+      // WDW non-resort: 3 days; WDW resort / DLR Premier Pass: 7 days
+      const daysAhead = config.resortGuest ? 7 : (isWDW ? 3 : 0);
       const eligibilityDate = modifyDate(bookingDate, -daysAhead);
       const nowDt = DateTime.now();
-      if (
-        nowDt.date < eligibilityDate ||
-        (nowDt.date === eligibilityDate && +nowDt.time < +new ParkTime(7, 0, 0))
-      ) {
-        safeSetStatus({
-          lastChecked,
-          message: `Waiting — booking window opens ${formatDate(eligibilityDate)} at 7:00 AM`,
-          running: true,
-        });
+
+      let notYetEligible: boolean;
+      if (nowDt.date < eligibilityDate) {
+        notYetEligible = true;
+      } else if (nowDt.date === eligibilityDate && (isWDW || config.resortGuest)) {
+        // Apply 7am time gate for all WDW guests and DLR Premier Pass holders
+        notYetEligible = +nowDt.time < +new ParkTime(isWDW ? 7 : 10, 0, 0);
+      } else {
+        notYetEligible = false;
+      }
+
+      if (notYetEligible) {
+        const tzLabel = isWDW ? 'EST' : 'PST';
+        const msg = (isWDW || config.resortGuest)
+          ? `Waiting — booking window opens ${formatDate(eligibilityDate)} at 7:00 AM ${tzLabel}`
+          : `Waiting — booking available day of visit after park check-in`;
+        safeSetStatus({ lastChecked, message: msg, running: true });
         checking.current = false;
         return;
       }

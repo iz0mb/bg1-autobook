@@ -11,6 +11,7 @@ import AutoBookContext, {
 import BookingDateContext from '@/contexts/BookingDateContext';
 import ExperiencesContext from '@/contexts/ExperiencesContext';
 import ParkContext from '@/contexts/ParkContext';
+import ResortContext from '@/contexts/ResortContext';
 import { DateTime, formatTime } from '@/datetime';
 
 import RefreshButton from './RefreshButton';
@@ -48,6 +49,7 @@ export default function AutoBooker() {
   const { config, saveConfig, status } = use(AutoBookContext);
   const { bookingDate } = use(BookingDateContext);
   const { park } = use(ParkContext);
+  const resort = use(ResortContext);
   const { experiences, refreshExperiences, loaderElem } =
     use(ExperiencesContext);
 
@@ -139,6 +141,22 @@ export default function AutoBooker() {
           />
           Upgrade existing bookings to earlier times
         </label>
+        <label className="flex items-center gap-x-2 mt-2 font-semibold">
+          <input
+            type="checkbox"
+            checked={draft.resortGuest}
+            onChange={event => update({ resortGuest: event.currentTarget.checked })}
+          />
+          {resort.id === 'WDW' ? 'Disney resort hotel guest' : 'Lightning Lane Premier Pass holder'}
+        </label>
+        <p className="text-xs text-gray-500 mt-1 ml-6">
+          {resort.id === 'WDW'
+            ? 'Resort hotel guests can book 7 days ahead at 7:00 AM EST; non-resort guests 3 days ahead.'
+            : draft.resortGuest
+              ? 'Premier Pass holders can book 7 days ahead at 7:00 AM PST.'
+              : 'Standard Multi Pass bookings open after you check into the park on the day of your visit.'}
+          {' '}Enable auto-book early and it will wait until your window opens.
+        </p>
         <label className="flex items-center gap-x-2 mt-2 font-semibold text-orange-600">
           <input
             type="checkbox"
@@ -147,18 +165,6 @@ export default function AutoBooker() {
           />
           Dry run — simulate bookings, no real reservations
         </label>
-        <label className="flex items-center gap-x-2 mt-2 font-semibold">
-          <input
-            type="checkbox"
-            checked={draft.resortGuest}
-            onChange={event => update({ resortGuest: event.currentTarget.checked })}
-          />
-          Disney resort hotel guest
-        </label>
-        <p className="text-xs text-gray-500 mt-1 ml-6">
-          Resort guests can book 7 days ahead at 7:00 AM; non-resort guests 3 days ahead.
-          Enable auto-book early and it will wait until your window opens.
-        </p>
         <p className="mt-2 text-sm text-gray-600">
           Status: {status.message}
           {status.lastChecked && (
