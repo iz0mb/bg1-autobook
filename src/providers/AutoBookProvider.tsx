@@ -73,7 +73,7 @@ type WebhookEvent =
   | { type: 'skip'; experienceName: string; reason: string }
   | { type: 'error'; message: string; parkName: string; date: string }
   | { type: 'stopped'; reason: string; parkName: string; date: string }
-  | { type: 'scheduled'; parkName: string; date: string; opensAt: string; targetCount: number };
+  | { type: 'scheduled'; parkName: string; date: string; opensAt: string; targetNames: string[]; };
 
 async function sendWebhook(url: string, event: WebhookEvent) {
   if (!url.trim()) return;
@@ -170,7 +170,11 @@ async function sendWebhook(url: string, event: WebhookEvent) {
       color = 0x5865f2;
       fields.push(
         { name: 'Booking Window Opens', value: event.opensAt, inline: false },
-        { name: 'Rides Queued', value: `${event.targetCount}`, inline: true }
+        {
+          name: `Rides Queued (${event.targetNames.length})`,
+          value: event.targetNames.join('\n'),
+          inline: false,
+        }
       );
       break;
   }
@@ -342,7 +346,10 @@ export default function AutoBookProvider({
             parkName: park.name,
             date: bookingDate,
             opensAt,
-            targetCount: config.targetIds.length,
+            targetNames: config.targetIds.map(id => {
+              try { return resort.experience(id).name; }
+              catch { return `Ride (...${id.slice(-4)})`; }
+            }),
           }).catch(console.error);
         }
         safeSetStatus({ lastChecked, message: msg, running: true });

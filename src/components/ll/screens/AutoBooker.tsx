@@ -207,6 +207,9 @@ export default function AutoBooker() {
               update({ maxMinutesFromNow: Number(event.currentTarget.value) })
             }
           />
+          <span className="block text-xs text-gray-400 mt-1">
+            Same-day only — advance bookings are unaffected.
+          </span>
         </label>
         <label>
           <span className="block text-xs font-semibold uppercase text-gray-500">
