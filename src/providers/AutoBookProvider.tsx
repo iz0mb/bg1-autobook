@@ -333,8 +333,12 @@ export default function AutoBookProvider({
       if (nowDt.date < eligibilityDate) {
         notYetEligible = true;
       } else if (nowDt.date === eligibilityDate && (isWDW || config.resortGuest)) {
-        // Apply 7am time gate for all WDW guests and DLR Premier Pass holders
-        notYetEligible = +nowDt.time < +new ParkTime(openHour, 0, 0);
+        // Apply 7am clock-time gate for all WDW guests and DLR Premier Pass holders.
+        // Must use raw clock seconds (midnight-based), NOT ParkTime valueOf() which is
+        // 4am-relative and wraps — causing pre-7am times like 1:30am to compare as
+        // greater than 7am, incorrectly marking the window as open.
+        const nowClockSecs = nowDt.time.hour * 3600 + nowDt.time.minute * 60 + nowDt.time.second;
+        notYetEligible = nowClockSecs < openHour * 3600;
       } else {
         notYetEligible = false;
       }

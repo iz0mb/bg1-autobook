@@ -196,72 +196,17 @@ export default function AutoBooker() {
           {countdown && (
             <span className="ml-1 font-semibold text-blue-600">({countdown})</span>
           )}
-          {status.lastChecked && !isWaiting && (
+          {status.lastChecked && (
             <><br />Last checked: {formatTime(status.lastChecked.split('T')[1] ?? '')}</>
           )}
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mt-2">
-        <label>
-          <span className="block text-xs font-semibold uppercase text-gray-500">
-            Poll every
-          </span>
-          <select
-            className="w-full mt-1 border rounded px-2 py-1"
-            value={draft.intervalSeconds}
-            onChange={event =>
-              update({ intervalSeconds: Number(event.currentTarget.value) })
-            }
-          >
-            {[1, 2, 3, 5, 10, 30].map(seconds => (
-              <option value={seconds} key={seconds}>
-                {seconds} sec
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          <span className="block text-xs font-semibold uppercase text-gray-500">
-            Interval jitter
-          </span>
-          <select
-            className="w-full mt-1 border rounded px-2 py-1"
-            value={draft.jitterPercent ?? 25}
-            onChange={event =>
-              update({ jitterPercent: Number(event.currentTarget.value) })
-            }
-          >
-            {[0, 10, 25, 50].map(p => (
-              <option value={p} key={p}>{p === 0 ? 'None' : `±${p}%`}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span className="block text-xs font-semibold uppercase text-gray-500">
-            Max mins from now
-          </span>
-          <input
-            className="w-full mt-1 border rounded px-2 py-1"
-            type="number"
-            min="1"
-            step="5"
-            value={draft.maxMinutesFromNow}
-            onChange={event =>
-              update({ maxMinutesFromNow: Number(event.currentTarget.value) })
-            }
-          />
-          <span className="block text-xs text-gray-400 mt-1">
-            Same-day only — advance bookings are unaffected.
-          </span>
-        </label>
-      </div>
-
-      <div className="mt-4">
+      <div className="mt-3">
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs font-semibold uppercase text-gray-500">
             Discord webhook
+            <span className="ml-1 normal-case font-normal text-gray-400">(optional)</span>
           </span>
           {draft.webhookUrl ? (
             <button
@@ -304,6 +249,65 @@ export default function AutoBooker() {
         )}
       </div>
 
+      <div className="grid grid-cols-2 gap-3 mt-3">
+        <label>
+          <span className="block text-xs font-semibold uppercase text-gray-500">
+            Poll every
+          </span>
+          <select
+            className="w-full mt-1 border rounded px-2 py-1"
+            value={draft.intervalSeconds}
+            onChange={event =>
+              update({ intervalSeconds: Number(event.currentTarget.value) })
+            }
+          >
+            {[1, 2, 3, 5, 10, 30].map(seconds => (
+              <option value={seconds} key={seconds}>
+                {seconds} sec
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          <span className="block text-xs font-semibold uppercase text-gray-500">
+            Interval jitter
+          </span>
+          <select
+            className="w-full mt-1 border rounded px-2 py-1"
+            value={draft.jitterPercent ?? 25}
+            onChange={event =>
+              update({ jitterPercent: Number(event.currentTarget.value) })
+            }
+          >
+            {[0, 10, 25, 50].map(p => (
+              <option value={p} key={p}>{p === 0 ? 'None' : `±${p}%`}</option>
+            ))}
+          </select>
+        </label>
+
+        <label className="col-span-2">
+          <span className="block text-xs font-semibold uppercase text-gray-500">
+            Max mins from now
+          </span>
+          <div className="flex items-center gap-2 mt-1">
+            <input
+              className="w-24 border rounded px-2 py-1"
+              type="number"
+              min="1"
+              step="5"
+              value={draft.maxMinutesFromNow}
+              onChange={event =>
+                update({ maxMinutesFromNow: Number(event.currentTarget.value) })
+              }
+            />
+            <span className="text-xs text-gray-400">
+              Same-day only — advance bookings are unaffected.
+            </span>
+          </div>
+        </label>
+      </div>
+
       <h2>Targets</h2>
       <p className="text-sm text-gray-600">
         Booking date: {bookingDate}. Today&apos;s cutoff is within{' '}
@@ -324,9 +328,13 @@ export default function AutoBooker() {
                   onChange={() => toggleTarget(exp.id)}
                 />
                 <span className="flex-1 leading-tight">
-                  <span className={`block font-semibold ${exp.experienced ? 'line-through text-gray-400' : ''}`}>{exp.name}</span>
+                  <span className="block font-semibold">
+                    {exp.name}
+                    {exp.experienced && (
+                      <span className="ml-1.5 inline-block align-middle text-xs font-medium bg-green-100 text-green-700 rounded px-1.5 py-0.5">Booked</span>
+                    )}
+                  </span>
                   <span className="text-sm text-gray-600">
-                    {exp.experienced && <span className="text-green-600 font-medium">Done · </span>}
                     {targetOrder.has(exp.id) && (
                       <>
                         Priority {(targetOrder.get(exp.id) ?? 0) + 1}
