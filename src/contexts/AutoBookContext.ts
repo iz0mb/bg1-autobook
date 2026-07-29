@@ -11,6 +11,7 @@ export interface AutoBookConfig {
   webhookUrl: string;
   upgradeExisting: boolean;
   dryRun: boolean;
+  resortGuest: boolean;
 }
 
 export interface AutoBookStatus {
@@ -34,6 +35,7 @@ export const DEFAULT_AUTO_BOOK_CONFIG: AutoBookConfig = {
   webhookUrl: '',
   upgradeExisting: false,
   dryRun: false,
+  resortGuest: false,
 };
 
 export default createContext<AutoBookContextValue>({

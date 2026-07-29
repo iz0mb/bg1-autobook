@@ -13,7 +13,7 @@ import BookingDateContext from '@/contexts/BookingDateContext';
 import ClientsContext from '@/contexts/ClientsContext';
 import ParkContext from '@/contexts/ParkContext';
 import PlansContext from '@/contexts/PlansContext';
-import { DateTime, formatTime, parkDate, ParkTime } from '@/datetime';
+import { DateTime, formatDate, formatTime, modifyDate, parkDate, ParkTime } from '@/datetime';
 import kvdb from '@/kvdb';
 
 function loadConfig(): AutoBookConfig {
@@ -27,6 +27,7 @@ function loadConfig(): AutoBookConfig {
     maxMinutesFromNow: Math.max(1, config.maxMinutesFromNow ?? 120),
     webhookUrl: typeof config.webhookUrl === 'string' ? config.webhookUrl : '',
     upgradeExisting: config.upgradeExisting === true,
+    resortGuest: config.resortGuest === true,
   };
 }
 
@@ -291,6 +292,23 @@ export default function AutoBookProvider({
       checking.current = true;
       const lastChecked = DateTime.now().toString();
       safeSetStatus({ lastChecked, message: config.dryRun ? '[DRY RUN] Checking' : 'Checking', running: true });
+
+      // Wait until the booking eligibility window opens
+      const daysAhead = config.resortGuest ? 7 : 3;
+      const eligibilityDate = modifyDate(bookingDate, -daysAhead);
+      const nowDt = DateTime.now();
+      if (
+        nowDt.date < eligibilityDate ||
+        (nowDt.date === eligibilityDate && +nowDt.time < +new ParkTime(7, 0, 0))
+      ) {
+        safeSetStatus({
+          lastChecked,
+          message: `Waiting — booking window opens ${formatDate(eligibilityDate)} at 7:00 AM`,
+          running: true,
+        });
+        checking.current = false;
+        return;
+      }
 
       try {
         const targetIds = new Set(config.targetIds);

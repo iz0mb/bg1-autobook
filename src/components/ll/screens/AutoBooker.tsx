@@ -37,6 +37,7 @@ function loadSavedAutoBookConfig(config: AutoBookConfig): AutoBookConfig {
       enabled: !!saved.enabled,
       upgradeExisting: saved.upgradeExisting === true,
       dryRun: saved.dryRun === true,
+      resortGuest: saved.resortGuest === true,
     };
   } catch {
     return config;
@@ -96,6 +97,7 @@ export default function AutoBooker() {
       enabled: !!draft.enabled,
       upgradeExisting: !!draft.upgradeExisting,
       dryRun: !!draft.dryRun,
+      resortGuest: !!draft.resortGuest,
     };
 
     localStorage.setItem(AUTO_BOOK_KEY, JSON.stringify(cleanDraft));
@@ -145,6 +147,18 @@ export default function AutoBooker() {
           />
           Dry run — simulate bookings, no real reservations
         </label>
+        <label className="flex items-center gap-x-2 mt-2 font-semibold">
+          <input
+            type="checkbox"
+            checked={draft.resortGuest}
+            onChange={event => update({ resortGuest: event.currentTarget.checked })}
+          />
+          Disney resort hotel guest
+        </label>
+        <p className="text-xs text-gray-500 mt-1 ml-6">
+          Resort guests can book 7 days ahead at 7:00 AM; non-resort guests 3 days ahead.
+          Enable auto-book early and it will wait until your window opens.
+        </p>
         <p className="mt-2 text-sm text-gray-600">
           Status: {status.message}
           {status.lastChecked && (
