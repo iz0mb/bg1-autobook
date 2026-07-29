@@ -305,8 +305,15 @@ export default function AutoBookProvider({
       }).catch(console.error);
     };
 
+    // Throttle slow-polling while waiting far from the booking window.
+    // Resets to 0 each time the effect re-runs (config/park change).
+    let waitThrottleUntilMs = 0;
+
     async function checkOnce() {
       if (checking.current || cancelled) return;
+      // While waiting for the booking window to open and far from it,
+      // skip polls that fall within the slow-poll period.
+      if (Date.now() < waitThrottleUntilMs) return;
       checking.current = true;
       const lastChecked = DateTime.now().toString();
       safeSetStatus({ lastChecked, message: config.dryRun ? '[DRY RUN] Checking' : 'Checking', running: true });
@@ -317,6 +324,7 @@ export default function AutoBookProvider({
       // WDW non-resort: 3 days; WDW resort / DLR Premier Pass: 7 days
       const daysAhead = config.resortGuest ? 7 : (isWDW ? 3 : 0);
       const eligibilityDate = modifyDate(bookingDate, -daysAhead);
+      const openHour = (isWDW || config.resortGuest) ? (isWDW ? 7 : 10) : 0;
       const nowDt = DateTime.now();
 
       let notYetEligible: boolean;
@@ -324,7 +332,7 @@ export default function AutoBookProvider({
         notYetEligible = true;
       } else if (nowDt.date === eligibilityDate && (isWDW || config.resortGuest)) {
         // Apply 7am time gate for all WDW guests and DLR Premier Pass holders
-        notYetEligible = +nowDt.time < +new ParkTime(isWDW ? 7 : 10, 0, 0);
+        notYetEligible = +nowDt.time < +new ParkTime(openHour, 0, 0);
       } else {
         notYetEligible = false;
       }
@@ -337,6 +345,20 @@ export default function AutoBookProvider({
         const msg = (isWDW || config.resortGuest)
           ? `Waiting — booking window opens ${opensAt}`
           : `Waiting — booking available day of visit after park check-in`;
+        // Compute stable countdown target (seconds remaining until eligibility)
+        const dayDiff = Math.round(
+          (new Date(eligibilityDate + 'T12:00:00').getTime() - new Date(nowDt.date + 'T12:00:00').getTime()) / 86400000
+        );
+        const nowSecsFromMidnight = nowDt.time.hour * 3600 + nowDt.time.minute * 60 + nowDt.time.second;
+        const secsRemaining = Math.max(0, dayDiff * 86400 + openHour * 3600 - nowSecsFromMidnight);
+        const waitingUntilMs = Date.now() + secsRemaining * 1000;
+        // Throttle polling to at most once per 60s when > 5 min from window.
+        // Cap so we never throttle past the 5-minute mark (go aggressive then).
+        const AGGRESSIVE_THRESHOLD_S = 300; // 5 minutes
+        if (secsRemaining > AGGRESSIVE_THRESHOLD_S) {
+          const throttleMs = Math.min(60_000, (secsRemaining - AGGRESSIVE_THRESHOLD_S) * 1000);
+          waitThrottleUntilMs = Date.now() + throttleMs;
+        }
         // Fire scheduled webhook once per unique (park, date, targets) combo
         const scheduledFingerprint = `${park.id}:${bookingDate}:${config.targetIds.join(',')}`;
         if (scheduledWebhookFingerprintRef.current !== scheduledFingerprint) {
@@ -352,7 +374,7 @@ export default function AutoBookProvider({
             }),
           }).catch(console.error);
         }
-        safeSetStatus({ lastChecked, message: msg, running: true });
+        safeSetStatus({ lastChecked, message: msg, running: true, waitingUntilMs });
         checking.current = false;
         return;
       }

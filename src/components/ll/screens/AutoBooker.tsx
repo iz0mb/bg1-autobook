@@ -1,4 +1,4 @@
-import { use, useEffect, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 
 import { FlexExperience } from '@/api/ll';
 import FloatingButton from '@/components/FloatingButton';
@@ -13,6 +13,7 @@ import ExperiencesContext from '@/contexts/ExperiencesContext';
 import ParkContext from '@/contexts/ParkContext';
 import ResortContext from '@/contexts/ResortContext';
 import { DateTime, formatTime } from '@/datetime';
+import useFlash from '@/hooks/useFlash';
 
 import RefreshButton from './RefreshButton';
 
@@ -52,6 +53,7 @@ export default function AutoBooker() {
   const resort = use(ResortContext);
   const { experiences, refreshExperiences, loaderElem } =
     use(ExperiencesContext);
+  const [flashElem, flash] = useFlash();
 
   const [draft, setDraft] = useState<AutoBookConfig>(() =>
     loadSavedAutoBookConfig(config)
@@ -104,15 +106,39 @@ export default function AutoBooker() {
 
     localStorage.setItem(AUTO_BOOK_KEY, JSON.stringify(cleanDraft));
     saveConfig(cleanDraft);
-
-    alert(
-      `Saved Auto Booker\nEnabled: ${cleanDraft.enabled}\nTargets: ${cleanDraft.targetIds.length}`
-    );
-
-    history.back();
+    flash('Settings saved!');
+    setTimeout(() => history.back(), 800);
   };
 
   const now = DateTime.now().time;
+
+  // Live countdown to booking window
+  const waitingUntilMsRef = useRef<number | undefined>(undefined);
+  waitingUntilMsRef.current = status.waitingUntilMs;
+  const [countdown, setCountdown] = useState('');
+  const isWaiting = status.waitingUntilMs != null;
+  useEffect(() => {
+    if (!isWaiting) { setCountdown(''); return; }
+    const tick = () => {
+      const target = waitingUntilMsRef.current;
+      if (target == null) { setCountdown(''); return; }
+      const ms = target - Date.now();
+      if (ms <= 0) { setCountdown('Opening now…'); return; }
+      const s = Math.floor(ms / 1000);
+      const d = Math.floor(s / 86400);
+      const h = Math.floor((s % 86400) / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const sec = s % 60;
+      setCountdown(
+        d > 0 ? `${d}d ${h}h ${m}m` :
+        h > 0 ? `${h}h ${m}m ${sec}s` :
+        `${m}m ${sec}s`
+      );
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [isWaiting]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Screen
@@ -167,6 +193,9 @@ export default function AutoBooker() {
         </label>
         <p className="mt-2 text-sm text-gray-600">
           Status: {status.message}
+          {countdown && (
+            <span className="ml-1 font-semibold text-blue-600">({countdown})</span>
+          )}
           {status.lastChecked && (
             <><br />Last checked: {formatTime(status.lastChecked.split('T')[1] ?? '')}</>
           )}
@@ -185,7 +214,7 @@ export default function AutoBooker() {
               update({ intervalSeconds: Number(event.currentTarget.value) })
             }
           >
-            {[1, 2, 3].map(seconds => (
+            {[1, 2, 3, 5, 10, 30].map(seconds => (
               <option value={seconds} key={seconds}>
                 {seconds} sec
               </option>
@@ -193,24 +222,6 @@ export default function AutoBooker() {
           </select>
         </label>
 
-        <label>
-          <span className="block text-xs font-semibold uppercase text-gray-500">
-            Max from now
-          </span>
-          <input
-            className="w-full mt-1 border rounded px-2 py-1"
-            type="number"
-            min="1"
-            step="5"
-            value={draft.maxMinutesFromNow}
-            onChange={event =>
-              update({ maxMinutesFromNow: Number(event.currentTarget.value) })
-            }
-          />
-          <span className="block text-xs text-gray-400 mt-1">
-            Same-day only — advance bookings are unaffected.
-          </span>
-        </label>
         <label>
           <span className="block text-xs font-semibold uppercase text-gray-500">
             Interval jitter
@@ -226,6 +237,24 @@ export default function AutoBooker() {
               <option value={p} key={p}>{p === 0 ? 'None' : `±${p}%`}</option>
             ))}
           </select>
+        </label>
+        <label>
+          <span className="block text-xs font-semibold uppercase text-gray-500">
+            Max mins from now
+          </span>
+          <input
+            className="w-full mt-1 border rounded px-2 py-1"
+            type="number"
+            min="1"
+            step="5"
+            value={draft.maxMinutesFromNow}
+            onChange={event =>
+              update({ maxMinutesFromNow: Number(event.currentTarget.value) })
+            }
+          />
+          <span className="block text-xs text-gray-400 mt-1">
+            Same-day only — advance bookings are unaffected.
+          </span>
         </label>
       </div>
 
@@ -253,8 +282,8 @@ export default function AutoBooker() {
                     ],
                   }),
                 })
-                  .then(() => alert('Webhook sent!'))
-                  .catch(e => alert('Webhook failed: ' + String(e)));
+                  .then(() => flash('Webhook sent!'))
+                  .catch(e => flash('Webhook failed: ' + String(e), 'error'));
               }}
             >
               Test
@@ -268,6 +297,11 @@ export default function AutoBooker() {
           onChange={event => update({ webhookUrl: event.currentTarget.value })}
           placeholder="https://discord.com/api/webhooks/..."
         />
+        {draft.webhookUrl && (
+          <span className={`block text-xs mt-1 ${/^https:\/\/discord\.com\/api\/webhooks\/\d+\/.+/.test(draft.webhookUrl.trim()) ? 'text-green-600' : 'text-red-500'}`}>
+            {/^https:\/\/discord\.com\/api\/webhooks\/\d+\/.+/.test(draft.webhookUrl.trim()) ? '✓ Valid Discord webhook' : '✗ Must be a Discord webhook URL'}
+          </span>
+        )}
       </div>
 
       <h2>Targets</h2>
@@ -290,8 +324,9 @@ export default function AutoBooker() {
                   onChange={() => toggleTarget(exp.id)}
                 />
                 <span className="flex-1 leading-tight">
-                  <span className="block font-semibold">{exp.name}</span>
+                  <span className={`block font-semibold ${exp.experienced ? 'line-through text-gray-400' : ''}`}>{exp.name}</span>
                   <span className="text-sm text-gray-600">
+                    {exp.experienced && <span className="text-green-600 font-medium">Done · </span>}
                     {targetOrder.has(exp.id) && (
                       <>
                         Priority {(targetOrder.get(exp.id) ?? 0) + 1}
@@ -313,6 +348,7 @@ export default function AutoBooker() {
       )}
 
       {loaderElem}
+      {flashElem}
       <FloatingButton
         disabled={draft.enabled && draft.targetIds.length === 0}
         onClick={save}

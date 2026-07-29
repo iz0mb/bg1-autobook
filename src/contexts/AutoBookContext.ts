@@ -18,6 +18,7 @@ export interface AutoBookStatus {
   lastChecked?: string;
   message: string;
   running: boolean;
+  waitingUntilMs?: number;
 }
 
 export interface AutoBookContextValue {
