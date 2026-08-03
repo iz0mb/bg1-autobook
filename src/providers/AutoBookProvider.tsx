@@ -362,6 +362,24 @@ export default function AutoBookProvider({
       });
       return;
     }
+    if (
+      resort.id === 'WDW' &&
+      config.resortGuest &&
+      /^\d{4}-\d{2}-\d{2}$/.test(config.resortCheckInDate) &&
+      bookingDate < config.resortCheckInDate
+    ) {
+      // The selected park day is before the configured resort check-in
+      // date — you can't have a covered stay for a day before you've
+      // checked in, so this almost always means the day picker (still on
+      // "today") hasn't been updated to match the actual visit date. Stop
+      // and surface it instead of silently waiting on a window computed
+      // from a check-in date that doesn't line up with the selected day.
+      setStatus({
+        message: `Park day (${formatDate(bookingDate)}) is before your resort check-in date (${formatDate(config.resortCheckInDate)}) — update the day picker or check-in date`,
+        running: false,
+      });
+      return;
+    }
 
     wasEnabledRef.current = true;
     let cancelled = false;
@@ -409,11 +427,16 @@ export default function AutoBookProvider({
       // DLR standard Multi Pass: same-day after park check-in (no pre-day gate, API enforces)
       // WDW non-resort: 3 days; WDW resort / DLR Premier Pass: 7 days
       const daysAhead = config.resortGuest ? 7 : isWDW ? 3 : 0;
+      // Note: intentionally NOT gated on `<= bookingDate` — if the day picker
+      // hasn't caught up to the actual stay yet (e.g. still showing "today"
+      // while check-in is weeks away), falling back to bookingDate would
+      // compute an eligibilityDate in the past and start booking immediately.
+      // Any validly-formatted check-in date should always be honored so the
+      // failure mode is "wait longer than needed", never "skip the wait".
       const validCheckInDate =
         isWDW &&
         config.resortGuest &&
-        /^\d{4}-\d{2}-\d{2}$/.test(config.resortCheckInDate) &&
-        config.resortCheckInDate <= bookingDate
+        /^\d{4}-\d{2}-\d{2}$/.test(config.resortCheckInDate)
           ? config.resortCheckInDate
           : bookingDate;
       const eligibilityDate = modifyDate(validCheckInDate, -daysAhead);
