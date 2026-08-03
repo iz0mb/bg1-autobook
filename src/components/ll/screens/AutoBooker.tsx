@@ -217,7 +217,6 @@ export default function AutoBooker() {
             <input
               className="mt-1 border rounded px-2 py-1"
               type="date"
-              max={bookingDate}
               value={draft.resortCheckInDate}
               onChange={event =>
                 update({ resortCheckInDate: event.currentTarget.value })
