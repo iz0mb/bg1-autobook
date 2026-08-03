@@ -1,6 +1,7 @@
 import { use, useEffect, useRef, useState } from 'react';
 
 import { FlexExperience } from '@/api/ll';
+import Alert from '@/components/Alert';
 import FloatingButton from '@/components/FloatingButton';
 import Screen from '@/components/Screen';
 import { Time } from '@/components/Time';
@@ -12,7 +13,7 @@ import BookingDateContext from '@/contexts/BookingDateContext';
 import ExperiencesContext from '@/contexts/ExperiencesContext';
 import ParkContext from '@/contexts/ParkContext';
 import ResortContext from '@/contexts/ResortContext';
-import { DateTime, formatTime } from '@/datetime';
+import { DateTime, formatDate, formatTime } from '@/datetime';
 import useFlash from '@/hooks/useFlash';
 
 import RefreshButton from './RefreshButton';
@@ -46,6 +47,10 @@ function loadSavedAutoBookConfig(config: AutoBookConfig): AutoBookConfig {
       resortCheckInDate:
         typeof saved.resortCheckInDate === 'string'
           ? saved.resortCheckInDate
+          : '',
+      resortCheckOutDate:
+        typeof saved.resortCheckOutDate === 'string'
+          ? saved.resortCheckOutDate
           : '',
     };
   } catch {
@@ -97,6 +102,25 @@ export default function AutoBooker() {
     update({ targetIds: [...ids] });
   };
 
+  const hasCheckInDate = /^\d{4}-\d{2}-\d{2}$/.test(draft.resortCheckInDate);
+  const hasCheckOutDate = /^\d{4}-\d{2}-\d{2}$/.test(draft.resortCheckOutDate);
+  const checkInAfterBookingDate =
+    resort.id === 'WDW' &&
+    draft.resortGuest &&
+    hasCheckInDate &&
+    bookingDate < draft.resortCheckInDate;
+  const missingCheckOutDate =
+    resort.id === 'WDW' &&
+    draft.resortGuest &&
+    hasCheckInDate &&
+    !hasCheckOutDate;
+  const bookingDateAfterCheckOut =
+    resort.id === 'WDW' &&
+    draft.resortGuest &&
+    hasCheckInDate &&
+    hasCheckOutDate &&
+    bookingDate > draft.resortCheckOutDate;
+
   const save = () => {
     const cleanDraft: AutoBookConfig = {
       ...draft,
@@ -113,6 +137,7 @@ export default function AutoBooker() {
       dryRun: !!draft.dryRun,
       resortGuest: !!draft.resortGuest,
       resortCheckInDate: draft.resortCheckInDate || '',
+      resortCheckOutDate: draft.resortCheckOutDate || '',
     };
 
     localStorage.setItem(AUTO_BOOK_KEY, JSON.stringify(cleanDraft));
@@ -226,6 +251,55 @@ export default function AutoBooker() {
               Optional. Used to open later park days with the stay window.
             </span>
           </label>
+        )}
+        {resort.id === 'WDW' && draft.resortGuest && hasCheckInDate && (
+          <label className="block mt-2 ml-6">
+            <span className="block text-xs font-semibold uppercase text-gray-500">
+              Resort check-out date
+            </span>
+            <input
+              className="mt-1 border rounded px-2 py-1"
+              type="date"
+              value={draft.resortCheckOutDate}
+              onChange={event =>
+                update({ resortCheckOutDate: event.currentTarget.value })
+              }
+            />
+            <span className="block text-xs text-gray-400 mt-1">
+              Required once a check-in date is set — used to confirm the
+              selected park day actually falls within your stay.
+            </span>
+          </label>
+        )}
+        {checkInAfterBookingDate && (
+          <Alert title="Check-in is after this park day" className="ml-6">
+            <p className="py-1 text-sm">
+              Your resort check-in ({formatDate(draft.resortCheckInDate)}) is
+              after the park day you&apos;re viewing ({formatDate(bookingDate)}
+              ). Auto book won&apos;t run until that lines up — pick a later
+              park day or update the check-in date.
+            </p>
+          </Alert>
+        )}
+        {!checkInAfterBookingDate && missingCheckOutDate && (
+          <Alert title="Check-out date needed" className="ml-6">
+            <p className="py-1 text-sm">
+              Enter your resort check-out date so we can confirm{' '}
+              {formatDate(bookingDate)} actually falls within your stay. Without
+              it, auto book won&apos;t run.
+            </p>
+          </Alert>
+        )}
+        {!checkInAfterBookingDate && bookingDateAfterCheckOut && (
+          <Alert title="Check-out is before this park day" className="ml-6">
+            <p className="py-1 text-sm">
+              The park day you&apos;re viewing ({formatDate(bookingDate)}) is
+              after your resort check-out date (
+              {formatDate(draft.resortCheckOutDate)}), so it isn&apos;t covered
+              by this stay&apos;s early-access window. Pick a park day within
+              your stay or update the check-out date.
+            </p>
+          </Alert>
         )}
         <label className="flex items-center gap-x-2 mt-2 font-semibold text-orange-600">
           <input

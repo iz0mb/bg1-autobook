@@ -13,6 +13,7 @@ export interface AutoBookConfig {
   dryRun: boolean;
   resortGuest: boolean;
   resortCheckInDate: string;
+  resortCheckOutDate: string;
 }
 
 export interface AutoBookStatus {
@@ -39,6 +40,7 @@ export const DEFAULT_AUTO_BOOK_CONFIG: AutoBookConfig = {
   dryRun: false,
   resortGuest: false,
   resortCheckInDate: '',
+  resortCheckOutDate: '',
 };
 
 export default createContext<AutoBookContextValue>({

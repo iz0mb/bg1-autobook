@@ -48,6 +48,10 @@ function loadConfig(): AutoBookConfig {
       typeof config.resortCheckInDate === 'string'
         ? config.resortCheckInDate
         : '',
+    resortCheckOutDate:
+      typeof config.resortCheckOutDate === 'string'
+        ? config.resortCheckOutDate
+        : '',
   };
 }
 
@@ -365,20 +369,48 @@ export default function AutoBookProvider({
     if (
       resort.id === 'WDW' &&
       config.resortGuest &&
-      /^\d{4}-\d{2}-\d{2}$/.test(config.resortCheckInDate) &&
-      bookingDate < config.resortCheckInDate
+      /^\d{4}-\d{2}-\d{2}$/.test(config.resortCheckInDate)
     ) {
-      // The selected park day is before the configured resort check-in
-      // date — you can't have a covered stay for a day before you've
-      // checked in, so this almost always means the day picker (still on
-      // "today") hasn't been updated to match the actual visit date. Stop
-      // and surface it instead of silently waiting on a window computed
-      // from a check-in date that doesn't line up with the selected day.
-      setStatus({
-        message: `Park day (${formatDate(bookingDate)}) is before your resort check-in date (${formatDate(config.resortCheckInDate)}) — update the day picker or check-in date`,
-        running: false,
-      });
-      return;
+      const hasCheckOutDate = /^\d{4}-\d{2}-\d{2}$/.test(
+        config.resortCheckOutDate
+      );
+      if (bookingDate < config.resortCheckInDate) {
+        // The selected park day is before the configured resort check-in
+        // date — you can't have a covered stay for a day before you've
+        // checked in, so this almost always means the day picker (still on
+        // "today") hasn't been updated to match the actual visit date. Stop
+        // and surface it instead of silently waiting on a window computed
+        // from a check-in date that doesn't line up with the selected day.
+        setStatus({
+          message: `Park day (${formatDate(bookingDate)}) is before your resort check-in date (${formatDate(config.resortCheckInDate)}) — update the day picker or check-in date`,
+          running: false,
+        });
+        return;
+      }
+      if (!hasCheckOutDate) {
+        // Without a check-out date we can't confirm the selected park day
+        // actually falls within the stay — the 7-day-before-check-in early
+        // window only covers the length of stay, not every future day.
+        // Refuse to guess rather than risk booking a day that isn't
+        // actually covered.
+        setStatus({
+          message:
+            'Enter your resort check-out date to confirm the selected park day falls within your stay',
+          running: false,
+        });
+        return;
+      }
+      if (bookingDate > config.resortCheckOutDate) {
+        // The selected park day is after check-out, so it isn't covered by
+        // this stay's early-access window — proceeding would incorrectly
+        // grant resort-guest early access to a day you won't actually have
+        // it for.
+        setStatus({
+          message: `Park day (${formatDate(bookingDate)}) is after your resort check-out date (${formatDate(config.resortCheckOutDate)}) — this day isn't covered by your stay`,
+          running: false,
+        });
+        return;
+      }
     }
 
     wasEnabledRef.current = true;
