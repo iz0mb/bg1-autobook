@@ -32,7 +32,10 @@ function loadSavedAutoBookConfig(config: AutoBookConfig): AutoBookConfig {
       ...saved,
       targetIds: Array.isArray(saved.targetIds) ? saved.targetIds : [],
       intervalSeconds: Number(saved.intervalSeconds) || config.intervalSeconds,
-      jitterPercent: saved.jitterPercent != null ? Math.max(0, Math.min(100, Number(saved.jitterPercent) || 0)) : config.jitterPercent,
+      jitterPercent:
+        saved.jitterPercent != null
+          ? Math.max(0, Math.min(100, Number(saved.jitterPercent) || 0))
+          : config.jitterPercent,
       maxMinutesFromNow:
         Number(saved.maxMinutesFromNow) || config.maxMinutesFromNow,
       webhookUrl: typeof saved.webhookUrl === 'string' ? saved.webhookUrl : '',
@@ -40,6 +43,10 @@ function loadSavedAutoBookConfig(config: AutoBookConfig): AutoBookConfig {
       upgradeExisting: saved.upgradeExisting === true,
       dryRun: saved.dryRun === true,
       resortGuest: saved.resortGuest === true,
+      resortCheckInDate:
+        typeof saved.resortCheckInDate === 'string'
+          ? saved.resortCheckInDate
+          : '',
     };
   } catch {
     return config;
@@ -95,13 +102,17 @@ export default function AutoBooker() {
       ...draft,
       targetIds: Array.isArray(draft.targetIds) ? draft.targetIds : [],
       intervalSeconds: Number(draft.intervalSeconds) || 3,
-      jitterPercent: Math.max(0, Math.min(100, Number(draft.jitterPercent) || 0)),
+      jitterPercent: Math.max(
+        0,
+        Math.min(100, Number(draft.jitterPercent) || 0)
+      ),
       maxMinutesFromNow: Number(draft.maxMinutesFromNow) || 120,
       webhookUrl: draft.webhookUrl || '',
       enabled: !!draft.enabled,
       upgradeExisting: !!draft.upgradeExisting,
       dryRun: !!draft.dryRun,
       resortGuest: !!draft.resortGuest,
+      resortCheckInDate: draft.resortCheckInDate || '',
     };
 
     localStorage.setItem(AUTO_BOOK_KEY, JSON.stringify(cleanDraft));
@@ -118,27 +129,38 @@ export default function AutoBooker() {
   const [countdown, setCountdown] = useState('');
   const isWaiting = status.waitingUntilMs != null;
   useEffect(() => {
-    if (!isWaiting) { setCountdown(''); return; }
+    if (!isWaiting) {
+      setCountdown('');
+      return;
+    }
     const tick = () => {
       const target = waitingUntilMsRef.current;
-      if (target == null) { setCountdown(''); return; }
+      if (target == null) {
+        setCountdown('');
+        return;
+      }
       const ms = target - Date.now();
-      if (ms <= 0) { setCountdown('Opening now…'); return; }
+      if (ms <= 0) {
+        setCountdown('Opening now…');
+        return;
+      }
       const s = Math.floor(ms / 1000);
       const d = Math.floor(s / 86400);
       const h = Math.floor((s % 86400) / 3600);
       const m = Math.floor((s % 3600) / 60);
       const sec = s % 60;
       setCountdown(
-        d > 0 ? `${d}d ${h}h ${m}m` :
-        h > 0 ? `${h}h ${m}m ${sec}s` :
-        `${m}m ${sec}s`
+        d > 0
+          ? `${d}d ${h}h ${m}m`
+          : h > 0
+            ? `${h}h ${m}m ${sec}s`
+            : `${m}m ${sec}s`
       );
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [isWaiting]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isWaiting]);
 
   return (
     <Screen
@@ -171,18 +193,41 @@ export default function AutoBooker() {
           <input
             type="checkbox"
             checked={draft.resortGuest}
-            onChange={event => update({ resortGuest: event.currentTarget.checked })}
+            onChange={event =>
+              update({ resortGuest: event.currentTarget.checked })
+            }
           />
-          {resort.id === 'WDW' ? 'Disney resort hotel guest' : 'Lightning Lane Premier Pass holder'}
+          {resort.id === 'WDW'
+            ? 'Disney resort hotel guest'
+            : 'Lightning Lane Premier Pass holder'}
         </label>
         <p className="text-xs text-gray-500 mt-1 ml-6">
           {resort.id === 'WDW'
-            ? 'Resort hotel guests can book 7 days ahead at 7:00 AM EST; non-resort guests 3 days ahead.'
+            ? 'Resort hotel guests can book from 7 days before check-in at 7:00 AM EST; non-resort guests 3 days before each park day.'
             : draft.resortGuest
               ? 'Premier Pass holders can book 7 days ahead at 7:00 AM PST.'
-              : 'Standard Multi Pass bookings open after you check into the park on the day of your visit.'}
-          {' '}Enable auto-book early and it will wait until your window opens.
+              : 'Standard Multi Pass bookings open after you check into the park on the day of your visit.'}{' '}
+          Enable auto-book early and it will wait until your window opens.
         </p>
+        {resort.id === 'WDW' && draft.resortGuest && (
+          <label className="block mt-2 ml-6">
+            <span className="block text-xs font-semibold uppercase text-gray-500">
+              Resort check-in date
+            </span>
+            <input
+              className="mt-1 border rounded px-2 py-1"
+              type="date"
+              max={bookingDate}
+              value={draft.resortCheckInDate}
+              onChange={event =>
+                update({ resortCheckInDate: event.currentTarget.value })
+              }
+            />
+            <span className="block text-xs text-gray-400 mt-1">
+              Optional. Used to open later park days with the stay window.
+            </span>
+          </label>
+        )}
         <label className="flex items-center gap-x-2 mt-2 font-semibold text-orange-600">
           <input
             type="checkbox"
@@ -194,10 +239,15 @@ export default function AutoBooker() {
         <p className="mt-2 text-sm text-gray-600">
           Status: {status.message}
           {countdown && (
-            <span className="ml-1 font-semibold text-blue-600">({countdown})</span>
+            <span className="ml-1 font-semibold text-blue-600">
+              ({countdown})
+            </span>
           )}
           {status.lastChecked && (
-            <><br />Last checked: {formatTime(status.lastChecked.split('T')[1] ?? '')}</>
+            <>
+              <br />
+              Last checked: {formatTime(status.lastChecked.split('T')[1] ?? '')}
+            </>
           )}
         </p>
       </div>
@@ -206,7 +256,9 @@ export default function AutoBooker() {
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs font-semibold uppercase text-gray-500">
             Discord webhook
-            <span className="ml-1 normal-case font-normal text-gray-400">(optional)</span>
+            <span className="ml-1 normal-case font-normal text-gray-400">
+              (optional)
+            </span>
           </span>
           {draft.webhookUrl ? (
             <button
@@ -243,8 +295,14 @@ export default function AutoBooker() {
           placeholder="https://discord.com/api/webhooks/..."
         />
         {draft.webhookUrl && (
-          <span className={`block text-xs mt-1 ${/^https:\/\/discord\.com\/api\/webhooks\/\d+\/.+/.test(draft.webhookUrl.trim()) ? 'text-green-600' : 'text-red-500'}`}>
-            {/^https:\/\/discord\.com\/api\/webhooks\/\d+\/.+/.test(draft.webhookUrl.trim()) ? '✓ Valid Discord webhook' : '✗ Must be a Discord webhook URL'}
+          <span
+            className={`block text-xs mt-1 ${/^https:\/\/discord\.com\/api\/webhooks\/\d+\/.+/.test(draft.webhookUrl.trim()) ? 'text-green-600' : 'text-red-500'}`}
+          >
+            {/^https:\/\/discord\.com\/api\/webhooks\/\d+\/.+/.test(
+              draft.webhookUrl.trim()
+            )
+              ? '✓ Valid Discord webhook'
+              : '✗ Must be a Discord webhook URL'}
           </span>
         )}
       </div>
@@ -281,7 +339,9 @@ export default function AutoBooker() {
             }
           >
             {[0, 10, 25, 50].map(p => (
-              <option value={p} key={p}>{p === 0 ? 'None' : `±${p}%`}</option>
+              <option value={p} key={p}>
+                {p === 0 ? 'None' : `±${p}%`}
+              </option>
             ))}
           </select>
         </label>
@@ -331,7 +391,9 @@ export default function AutoBooker() {
                   <span className="block font-semibold">
                     {exp.name}
                     {exp.experienced && (
-                      <span className="ml-1.5 inline-block align-middle text-xs font-medium bg-green-100 text-green-700 rounded px-1.5 py-0.5">Booked</span>
+                      <span className="ml-1.5 inline-block align-middle text-xs font-medium bg-green-100 text-green-700 rounded px-1.5 py-0.5">
+                        Booked
+                      </span>
                     )}
                   </span>
                   <span className="text-sm text-gray-600">

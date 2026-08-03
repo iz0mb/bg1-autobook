@@ -908,5 +908,21 @@ describe('LLTracker', () => {
       expect(tracker.experienced(booking.experience)).toBe(true);
       expect(tracker.experienced(expiredLL.experience)).toBe(true);
     });
+
+    it('does not mark an experience complete for a mixed-eligibility party', async () => {
+      kvdb.clear();
+      const mixedPartyTracker = new LLTracker();
+      await mixedPartyTracker.update([booking], ll);
+      ll.guests.mockResolvedValueOnce({
+        eligible: [minnie],
+        ineligible: [
+          { ...mickey, ineligibleReason: 'EXPERIENCE_LIMIT_REACHED' },
+        ],
+      });
+
+      await mixedPartyTracker.update([], ll);
+
+      expect(mixedPartyTracker.experienced(booking.experience)).toBe(false);
+    });
   });
 });

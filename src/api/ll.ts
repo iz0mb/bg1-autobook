@@ -248,7 +248,10 @@ export abstract class LLClient extends ApiClient {
       path: `/tipboard-vas/planning/v1/parks/${encodeURIComponent(
         park.id
       )}/experiences/`,
-      params: { date },
+      params: {
+        date,
+        eligibilityGuestIds: await this.primaryGuestId(),
+      },
       userId: true,
     });
     const nextBookTimeString = (
@@ -428,10 +431,13 @@ export class LLTracker {
     this.bookedIds = new Set(cancellableLLs.map(b => b.experience.id));
     for (const id of prevBookedIds) {
       if (this.bookedIds.has(id)) continue;
-      const { ineligible } = await client.guests({ id });
-      const limitReached = ineligible.some(
-        g => g.ineligibleReason === 'EXPERIENCE_LIMIT_REACHED'
-      );
+      const { eligible, ineligible } = await client.guests({ id });
+      const limitReached =
+        eligible.length === 0 &&
+        ineligible.length > 0 &&
+        ineligible.every(
+          g => g.ineligibleReason === 'EXPERIENCE_LIMIT_REACHED'
+        );
       this.experiencedIds[limitReached ? 'add' : 'delete'](id);
     }
     this.save();
