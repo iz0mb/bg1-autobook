@@ -463,6 +463,11 @@ export default function AutoBooker() {
                 <span className="flex-1 leading-tight">
                   <span className="block font-semibold">
                     {exp.name}
+                    {exp.tier !== undefined && (
+                      <span className="ml-1.5 align-middle text-xs font-semibold text-gray-400">
+                        T{exp.tier}
+                      </span>
+                    )}
                     {exp.experienced && (
                       <span className="ml-1.5 inline-block align-middle text-xs font-medium bg-green-100 text-green-700 rounded px-1.5 py-0.5">
                         Booked
