@@ -1,3 +1,5 @@
+// External ID's sourced from: https://www.themeparks.wiki/ ... viewable in <source> tab  "externalId" property.
+
 import { ResortData } from '../resort';
 
 const mk = {
