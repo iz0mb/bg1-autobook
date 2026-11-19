@@ -1,6 +1,6 @@
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 
-import { LLMP, isLLMP } from '@/api/itinerary';
+import { Booking, LLMP, isLLMP } from '@/api/itinerary';
 import {
   FlexExperience,
   Guest,
@@ -13,6 +13,7 @@ import AutoBookContext, {
   AutoBookConfig,
   AutoBookStatus,
   DEFAULT_AUTO_BOOK_CONFIG,
+  sanitizeGuestIdsByTarget,
 } from '@/contexts/AutoBookContext';
 import BookingDateContext from '@/contexts/BookingDateContext';
 import ClientsContext from '@/contexts/ClientsContext';
@@ -38,6 +39,7 @@ function loadConfig(): AutoBookConfig {
     ...DEFAULT_AUTO_BOOK_CONFIG,
     ...config,
     targetIds: Array.isArray(config.targetIds) ? config.targetIds : [],
+    guestIdsByTarget: sanitizeGuestIdsByTarget(config.guestIdsByTarget),
     intervalSeconds: Math.max(1, Math.min(30, config.intervalSeconds ?? 3)),
     jitterPercent: Math.max(0, Math.min(100, config.jitterPercent ?? 25)),
     maxMinutesFromNow: Math.max(1, config.maxMinutesFromNow ?? 120),
@@ -94,6 +96,35 @@ export function coversExpectedParty(
   );
 }
 
+/* eslint-disable-next-line react-refresh/only-export-components */
+export function resolveRideParty(
+  assignedIds: string[] | undefined,
+  partyIds: Set<string>
+) {
+  if (!assignedIds?.length) return partyIds;
+  return new Set(assignedIds.filter(id => partyIds.has(id)));
+}
+
+/* eslint-disable-next-line react-refresh/only-export-components */
+export function isExperienceBooked(
+  plans: Booking[],
+  experienceId: string,
+  bookingDate: string,
+  expectedPartyIds: Set<string>
+) {
+  return coversExpectedParty(
+    plans
+      .filter(isLLMP)
+      .filter(
+        booking =>
+          booking.experience.id === experienceId &&
+          isActiveBookingForDate(booking, bookingDate)
+      )
+      .flatMap(booking => booking.guests.map(guest => guest.id)),
+    expectedPartyIds
+  );
+}
+
 const randMs = (min: number, max: number) =>
   min + Math.floor(Math.random() * (max - min));
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
@@ -126,6 +157,13 @@ type WebhookEvent =
       date: string;
       guestCount: number;
       guestNames: string[];
+    }
+  | {
+      type: 'upgrade_failed';
+      experienceName: string;
+      oldTime: string;
+      newTime?: string;
+      date: string;
     }
   | {
       type: 'ticket_issue';
@@ -221,6 +259,22 @@ async function sendWebhook(url: string, event: WebhookEvent) {
         }
       );
       break;
+    case 'upgrade_failed':
+      title = event.newTime
+        ? '⚠️ Upgrade Failed — Rebooked'
+        : '🚨 Upgrade Failed — Booking Lost';
+      description = `**${event.experienceName}**`;
+      color = event.newTime ? 0xfee75c : 0xed4245;
+      fields.push(
+        { name: 'Previous', value: formatTime(event.oldTime), inline: true },
+        {
+          name: 'Now',
+          value: event.newTime ? formatTime(event.newTime) : 'No booking',
+          inline: true,
+        },
+        { name: 'Date', value: event.date, inline: true }
+      );
+      break;
     case 'ticket_issue':
       title = '⚠️ Ticket Issue — Stopped';
       description =
@@ -303,7 +357,7 @@ export default function AutoBookProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const { ll } = use(ClientsContext);
+  const { ll, itinerary } = use(ClientsContext);
   const { park } = use(ParkContext);
   const { bookingDate } = use(BookingDateContext);
   const { plans, refreshPlans } = use(PlansContext);
@@ -417,6 +471,8 @@ export default function AutoBookProvider({
     let cancelled = false;
     let expectedPartyIds = new Set<string>();
     let partySelectionFingerprint = '';
+    const partyFor = (experienceId: string) =>
+      resolveRideParty(config.guestIdsByTarget[experienceId], expectedPartyIds);
     const targetOrder = new Map(
       config.targetIds.map((id, index) => [id, index])
     );
@@ -436,6 +492,63 @@ export default function AutoBookProvider({
         date: bookingDate,
       }).catch(console.error);
     };
+
+    // When a modification fails, Disney may already have released the original
+    // booking. Verify against a fresh itinerary and rebook if it's gone, rather
+    // than leaving the party with nothing.
+    async function recoverFailedUpgrade(
+      oldBooking: LLMP,
+      exp: FlexExperience,
+      guests: Guest[],
+      lastChecked: string
+    ) {
+      const guestIds = new Set(guests.map(guest => guest.id));
+      try {
+        const fresh = await itinerary.plans();
+        if (isExperienceBooked(fresh, exp.id, bookingDate, guestIds)) {
+          refreshPlans();
+          return;
+        }
+      } catch (error) {
+        console.error(error);
+        refreshPlans();
+        return;
+      }
+
+      // Let the main loop retry too if the immediate rebook below fails
+      completedTargetIdsRef.current.delete(exp.id);
+      let newTime: ParkTime | undefined;
+      try {
+        const offer = await ll.offer(exp, guests, { date: bookingDate });
+        if (
+          offer.guests.ineligible.length === 0 &&
+          coversExpectedParty(
+            offer.guests.eligible.map(guest => guest.id),
+            guestIds
+          )
+        ) {
+          newTime = (await ll.book(offer)).start.time;
+          completedTargetIdsRef.current.add(exp.id);
+        }
+      } catch (error) {
+        console.error(error);
+      }
+      refreshPlans();
+
+      const oldTime = oldBooking.start.time;
+      const msg = newTime
+        ? `Upgrade of ${exp.name} failed; rebooked for ${formatTime(newTime)} (was ${formatTime(oldTime)})`
+        : `Upgrade of ${exp.name} failed and the ${formatTime(oldTime)} booking was lost — retrying`;
+      flash(msg, 'error');
+      safeSetStatus({ lastChecked, message: msg, running: true });
+      await sendWebhook(config.webhookUrl, {
+        type: 'upgrade_failed',
+        experienceName: exp.name,
+        oldTime: oldTime.toString(),
+        newTime: newTime?.toString(),
+        date: oldBooking.start.date,
+      });
+    }
 
     // Throttle slow-polling while waiting far from the booking window.
     // Resets to 0 each time the effect re-runs (config/park change).
@@ -613,7 +726,7 @@ export default function AutoBookProvider({
           const bookedGuestIds = bookedGuestIdsByExperience.get(experienceId);
           return (
             !!bookedGuestIds &&
-            coversExpectedParty(bookedGuestIds, expectedPartyIds)
+            coversExpectedParty(bookedGuestIds, partyFor(experienceId))
           );
         };
 
@@ -719,7 +832,17 @@ export default function AutoBookProvider({
             }
           }
 
+          const rideParty = partyFor(experience.id);
+          if (rideParty.size === 0) {
+            const skipReason =
+              'none of the assigned guests are in the selected party';
+            skipsThisCycle.set(experience.id, skipReason);
+            setFirstSkip(`${name}: ${skipReason}`);
+            continue;
+          }
+
           let guests: Guest[] = [];
+          let pendingIds = new Set<string>();
           let ticketIssue: IneligibleReason | undefined;
           try {
             await sleep(randMs(150, 500));
@@ -730,32 +853,41 @@ export default function AutoBookProvider({
             const ineligibleById = new Map(
               guestData.ineligible.map(guest => [guest.id, guest])
             );
-            const intendedIneligible = Array.from(expectedPartyIds)
+            // Guests who already hold this ride (e.g. from a partial earlier
+            // booking) don't need another LL; only book the rest.
+            const heldIds = new Set([
+              ...(bookedGuestIdsByExperience.get(experience.id) ?? []),
+              ...guestData.ineligible
+                .filter(
+                  guest => guest.ineligibleReason === 'EXPERIENCE_LIMIT_REACHED'
+                )
+                .map(guest => guest.id),
+            ]);
+            const pendingIdList = Array.from(rideParty).filter(
+              id => !heldIds.has(id)
+            );
+            pendingIds = new Set(pendingIdList);
+            const intendedIneligible = pendingIdList
               .map(id => ineligibleById.get(id))
               .filter((guest): guest is Guest => !!guest);
-            const missingGuestIds = Array.from(expectedPartyIds).filter(
+            const missingGuestIds = pendingIdList.filter(
               id => !eligibleById.has(id) && !ineligibleById.has(id)
             );
-            guests = Array.from(expectedPartyIds)
+            guests = pendingIdList
               .map(id => eligibleById.get(id))
               .filter((guest): guest is Guest => !!guest);
 
             if (config.dryRun) {
-              guests = Array.from(expectedPartyIds)
+              guests = pendingIdList
                 .map(id => eligibleById.get(id) ?? ineligibleById.get(id))
                 .filter((guest): guest is Guest => !!guest);
-            } else if (
-              intendedIneligible.length === expectedPartyIds.size &&
-              intendedIneligible.every(
-                guest => guest.ineligibleReason === 'EXPERIENCE_LIMIT_REACHED'
-              )
-            ) {
+            } else if (pendingIdList.length === 0) {
               completedTargetIdsRef.current.add(experience.id);
               continue;
             } else if (
               intendedIneligible.length > 0 ||
               missingGuestIds.length > 0 ||
-              guests.length !== expectedPartyIds.size
+              guests.length !== pendingIdList.length
             ) {
               const ticketGuest = intendedIneligible.find(
                 guest =>
@@ -819,7 +951,7 @@ export default function AutoBookProvider({
             );
             if (
               offer.guests.ineligible.length > 0 ||
-              !coversExpectedParty(offeredGuestIds, expectedPartyIds)
+              !coversExpectedParty(offeredGuestIds, pendingIds)
             ) {
               const offerReason =
                 'offer changed and no longer covers the full party';
@@ -845,7 +977,7 @@ export default function AutoBookProvider({
             );
             if (
               !config.dryRun &&
-              !coversExpectedParty(bookedGuestIds, expectedPartyIds)
+              !coversExpectedParty(bookedGuestIds, pendingIds)
             ) {
               refreshPlans();
               const msg = `Booked ${booking.experience.name}, but Disney omitted part of the party — verify reservations manually`;
@@ -993,20 +1125,15 @@ export default function AutoBookProvider({
                 e => e.id === existingBooking.experience.id
               );
               if (!exp) continue;
-              let upGuests: Guest[] = [];
-              try {
-                await sleep(randMs(150, 500));
-                const gd = await ll.guests(exp, bookingDate);
-                const eligibleById = new Map(
-                  gd.eligible.map(guest => [guest.id, guest])
-                );
-                upGuests = Array.from(expectedPartyIds)
-                  .map(id => eligibleById.get(id))
-                  .filter((guest): guest is Guest => !!guest);
-              } catch {
-                continue;
-              }
-              if (upGuests.length !== expectedPartyIds.size) continue;
+              // Only modify the guests assigned to this ride. Their booking
+              // guests are used directly (as the modify screen does), since
+              // Disney reports guests who hold the ride as ineligible.
+              const rideParty = partyFor(exp.id);
+              const upGuests: Guest[] = (existingBooking.guests as Guest[]).filter(
+                guest => rideParty.has(guest.id)
+              );
+              if (upGuests.length === 0) continue;
+              const upGuestIds = new Set(upGuests.map(guest => guest.id));
               try {
                 await sleep(randMs(200, 600));
                 const offer = await ll.offer(exp, upGuests, {
@@ -1017,7 +1144,7 @@ export default function AutoBookProvider({
                 );
                 if (
                   offer.guests.ineligible.length > 0 ||
-                  !coversExpectedParty(offeredGuestIds, expectedPartyIds)
+                  !coversExpectedParty(offeredGuestIds, upGuestIds)
                 ) {
                   continue;
                 }
@@ -1025,7 +1152,19 @@ export default function AutoBookProvider({
                   +offer.start.time < +existingBooking.start.time &&
                   isCloseEnough(offer.start, config.maxMinutesFromNow)
                 ) {
-                  const upgraded = await ll.book(offer);
+                  const upgraded = await ll
+                    .book(offer)
+                    .catch(async (error: unknown) => {
+                      console.error(error);
+                      await recoverFailedUpgrade(
+                        existingBooking,
+                        exp,
+                        upGuests,
+                        lastChecked
+                      );
+                      return undefined;
+                    });
+                  if (!upgraded) break;
                   refreshPlans();
                   await sendWebhook(config.webhookUrl, {
                     type: 'upgraded',
@@ -1061,13 +1200,14 @@ export default function AutoBookProvider({
               try {
                 await sleep(randMs(150, 500));
                 const gd = await ll.guests(exp, bookingDate);
-                upGuests =
-                  gd.eligible.length > 0
-                    ? gd.eligible.slice(0, ll.rules.maxPartySize)
-                    : (gd.ineligible as unknown as Guest[]).slice(
-                        0,
-                        ll.rules.maxPartySize
-                      );
+                const rideParty = partyFor(exp.id);
+                upGuests = [
+                  ...(gd.eligible.length > 0
+                    ? gd.eligible
+                    : (gd.ineligible as unknown as Guest[])),
+                ]
+                  .filter(guest => rideParty.has(guest.id))
+                  .slice(0, ll.rules.maxPartySize);
               } catch {
                 continue;
               }
@@ -1176,7 +1316,17 @@ export default function AutoBookProvider({
       removeVisibleListener();
       removeEventListener('online', onOnline);
     };
-  }, [bookingDate, config, flash, ll, park, plans, refreshPlans, saveConfig]);
+  }, [
+    bookingDate,
+    config,
+    flash,
+    itinerary,
+    ll,
+    park,
+    plans,
+    refreshPlans,
+    saveConfig,
+  ]);
 
   return (
     <AutoBookContext value={{ config, saveConfig, status }}>

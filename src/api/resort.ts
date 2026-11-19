@@ -119,6 +119,10 @@ export class Resort {
     throw new InvalidId(id);
   }
 
+  isIgnored(id: string) {
+    return this.expsById[id] === null;
+  }
+
   park(id: string) {
     const park = this.parksById[id];
     if (park) return park;

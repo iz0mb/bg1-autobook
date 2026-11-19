@@ -18,6 +18,7 @@ export default function ExperiencesProvider({
   const { bookingDate } = use(BookingDateContext);
   const { loadData, loaderElem } = useDataLoader();
   const [experiences, setExperiences] = useState<Experience[]>([]);
+  const [unmatchedIds, setUnmatchedIds] = useState<string[]>([]);
 
   const refreshExperiences = useThrottleable(
     useCallback(() => {
@@ -28,6 +29,7 @@ export default function ExperiencesProvider({
             (await ll.experiences(park, bookingDate)).map(exp => [exp.id, exp])
           ),
         };
+        setUnmatchedIds(ll.unmatchedIds);
         try {
           exps = { ...(await showsPromise), ...exps };
         } catch (error) {
@@ -38,12 +40,17 @@ export default function ExperiencesProvider({
     }, [park, bookingDate, ll, liveData, loadData])
   );
 
-  useLayoutEffect(() => setExperiences([]), [park, bookingDate]);
+  useLayoutEffect(() => {
+    setExperiences([]);
+    setUnmatchedIds([]);
+  }, [park, bookingDate]);
 
   useEffect(refreshExperiences, [refreshExperiences]);
 
   return (
-    <ExperiencesContext value={{ experiences, refreshExperiences, loaderElem }}>
+    <ExperiencesContext
+      value={{ experiences, unmatchedIds, refreshExperiences, loaderElem }}
+    >
       {children}
     </ExperiencesContext>
   );

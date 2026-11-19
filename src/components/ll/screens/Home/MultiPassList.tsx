@@ -54,7 +54,7 @@ export default function MultiPassList({ ref }: HomeTabProps) {
   useSavedParty();
   const { ll } = use(ClientsContext);
   const { park } = use(ParkContext);
-  const { experiences, refreshExperiences, loaderElem } =
+  const { experiences, unmatchedIds, refreshExperiences, loaderElem } =
     use(ExperiencesContext);
   const { bookingDate } = use(BookingDateContext);
   const { sortType, sorter, SortSelect } = useSort();
@@ -85,6 +85,11 @@ export default function MultiPassList({ ref }: HomeTabProps) {
       subhead={
         <>
           <RebookingHeader />
+          {unmatchedIds.length > 0 && (
+            <div className="px-3 py-1 text-xs text-center bg-yellow-100 text-yellow-800 border-b border-yellow-200">
+              Unmatched experience IDs: {unmatchedIds.join(', ')}
+            </div>
+          )}
           {bookingDate === today && (
             <TimeBanner bookTime={ll.nextBookTime} dropTime={dropTime} />
           )}

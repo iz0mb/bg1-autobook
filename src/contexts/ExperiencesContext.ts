@@ -6,12 +6,14 @@ import useThrottleable from '@/hooks/useThrottleable';
 
 interface ExperiencesState {
   experiences: Experience[];
+  unmatchedIds: string[];
   refreshExperiences: ReturnType<typeof useThrottleable>;
   loaderElem: ReturnType<typeof useDataLoader>['loaderElem'];
 }
 
 export default createContext<ExperiencesState>({
   experiences: [],
+  unmatchedIds: [],
   refreshExperiences: () => undefined,
   loaderElem: null,
 });

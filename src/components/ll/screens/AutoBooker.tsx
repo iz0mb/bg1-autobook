@@ -1,6 +1,6 @@
 import { use, useEffect, useRef, useState } from 'react';
 
-import { FlexExperience } from '@/api/ll';
+import { FlexExperience, Guest } from '@/api/ll';
 import Alert from '@/components/Alert';
 import FloatingButton from '@/components/FloatingButton';
 import Screen from '@/components/Screen';
@@ -8,13 +8,16 @@ import { Time } from '@/components/Time';
 import AutoBookContext, {
   AUTO_BOOK_KEY,
   AutoBookConfig,
+  sanitizeGuestIdsByTarget,
 } from '@/contexts/AutoBookContext';
 import BookingDateContext from '@/contexts/BookingDateContext';
+import ClientsContext from '@/contexts/ClientsContext';
 import ExperiencesContext from '@/contexts/ExperiencesContext';
 import ParkContext from '@/contexts/ParkContext';
 import ResortContext from '@/contexts/ResortContext';
 import { DateTime, formatDate, formatTime } from '@/datetime';
 import useFlash from '@/hooks/useFlash';
+import useSavedParty from '@/hooks/useSavedParty';
 
 import RefreshButton from './RefreshButton';
 
@@ -32,6 +35,7 @@ function loadSavedAutoBookConfig(config: AutoBookConfig): AutoBookConfig {
       ...config,
       ...saved,
       targetIds: Array.isArray(saved.targetIds) ? saved.targetIds : [],
+      guestIdsByTarget: sanitizeGuestIdsByTarget(saved.guestIdsByTarget),
       intervalSeconds: Number(saved.intervalSeconds) || config.intervalSeconds,
       jitterPercent:
         saved.jitterPercent != null
@@ -62,6 +66,9 @@ export default function AutoBooker() {
   const { config, saveConfig, status } = use(AutoBookContext);
   const { bookingDate } = use(BookingDateContext);
   const { park } = use(ParkContext);
+  const { ll } = use(ClientsContext);
+  const [partyIds] = useSavedParty();
+  const [partyGuests, setPartyGuests] = useState<Guest[]>([]);
   const resort = use(ResortContext);
   const { experiences, refreshExperiences, loaderElem } =
     use(ExperiencesContext);
@@ -102,6 +109,50 @@ export default function AutoBooker() {
     update({ targetIds: [...ids] });
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    ll.guests(undefined, bookingDate)
+      .then(({ eligible, ineligible }) => {
+        if (cancelled) return;
+        setPartyGuests(
+          [...eligible, ...ineligible]
+            .filter(g => partyIds.size === 0 || partyIds.has(g.id))
+            .sort(
+              (a, b) =>
+                +!a.primary - +!b.primary || a.name.localeCompare(b.name)
+            )
+        );
+      })
+      .catch(console.error);
+    return () => {
+      cancelled = true;
+    };
+  }, [ll, bookingDate, partyIds]);
+
+  const partyGuestIds = partyGuests.map(g => g.id);
+  // A ride with no saved assignment is for the whole party
+  const rideGuestIds = (experienceId: string) => {
+    const assigned = draft.guestIdsByTarget[experienceId];
+    return new Set(
+      assigned?.length
+        ? assigned.filter(id => partyGuestIds.includes(id))
+        : partyGuestIds
+    );
+  };
+
+  const toggleGuest = (experienceId: string, guestId: string) => {
+    const ids = rideGuestIds(experienceId);
+    ids[ids.has(guestId) ? 'delete' : 'add'](guestId);
+    if (ids.size === 0) return;
+    const guestIdsByTarget = { ...draft.guestIdsByTarget };
+    if (partyGuestIds.every(id => ids.has(id))) {
+      delete guestIdsByTarget[experienceId];
+    } else {
+      guestIdsByTarget[experienceId] = [...ids];
+    }
+    update({ guestIdsByTarget });
+  };
+
   const hasCheckInDate = /^\d{4}-\d{2}-\d{2}$/.test(draft.resortCheckInDate);
   const hasCheckOutDate = /^\d{4}-\d{2}-\d{2}$/.test(draft.resortCheckOutDate);
   const checkInAfterBookingDate =
@@ -122,9 +173,15 @@ export default function AutoBooker() {
     bookingDate > draft.resortCheckOutDate;
 
   const save = () => {
+    const cleanTargetIds = Array.isArray(draft.targetIds) ? draft.targetIds : [];
     const cleanDraft: AutoBookConfig = {
       ...draft,
-      targetIds: Array.isArray(draft.targetIds) ? draft.targetIds : [],
+      targetIds: cleanTargetIds,
+      guestIdsByTarget: Object.fromEntries(
+        Object.entries(sanitizeGuestIdsByTarget(draft.guestIdsByTarget)).filter(
+          ([id]) => cleanTargetIds.includes(id)
+        )
+      ),
       intervalSeconds: Number(draft.intervalSeconds) || 3,
       jitterPercent: Math.max(
         0,
@@ -323,6 +380,17 @@ export default function AutoBooker() {
             </>
           )}
         </p>
+        {config.enabled && (
+          <button
+            className="mt-2 px-3 py-1 rounded font-semibold uppercase tracking-wide text-sm bg-red-600 text-white"
+            onClick={() => {
+              saveConfig({ ...config, enabled: false });
+              flash('Auto Book stopped');
+            }}
+          >
+            Stop Run
+          </button>
+        )}
       </div>
 
       <div className="mt-3">
@@ -445,7 +513,8 @@ export default function AutoBooker() {
       <p className="text-sm text-gray-600">
         Booking date: {bookingDate}. Today&apos;s cutoff is within{' '}
         {draft.maxMinutesFromNow} minutes of <Time time={now} />. Selected
-        targets are checked first, in the order you add them.
+        targets are checked first, in the order you add them. Each selected
+        ride is booked for the whole party unless you uncheck guests under it.
       </p>
 
       {targetExperiences.length === 0 ? (
@@ -490,6 +559,28 @@ export default function AutoBooker() {
                   </span>
                 </span>
               </label>
+              {targetIds.has(exp.id) && partyGuests.length > 1 && (
+                <div className="ml-8 pb-2">
+                  <span className="block text-xs font-semibold uppercase text-gray-500">
+                    Guests for this ride
+                  </span>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
+                    {partyGuests.map(guest => (
+                      <label
+                        key={guest.id}
+                        className="flex items-center gap-x-1 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={rideGuestIds(exp.id).has(guest.id)}
+                          onChange={() => toggleGuest(exp.id, guest.id)}
+                        />
+                        {guest.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
             </li>
           ))}
         </ul>

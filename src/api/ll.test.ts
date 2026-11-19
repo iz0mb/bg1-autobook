@@ -115,7 +115,7 @@ describe('LLClientWDW', () => {
       expect(warn).toHaveBeenLastCalledWith(
         'Missing experience: not_a_real_id'
       );
-
+      expect(client.unmatchedIds).toEqual(['not_a_real_id']);
       respond(res);
       expect(await client.experiences(mk, TODAY)).toEqual(exps);
 

@@ -223,6 +223,8 @@ export abstract class LLClient extends ApiClient {
     timeSelect: false,
   };
   nextBookTime: ParkTime | undefined;
+  // IDs returned by the last experiences() call that aren't in the resort data
+  unmatchedIds: string[] = [];
   onUnauthorized = () => undefined;
 
   protected partyIds = new Set<Guest['id']>();
@@ -259,7 +261,8 @@ export abstract class LLClient extends ApiClient {
       ? ParkTime.from(nextBookTimeString)
       : undefined;
 
-    return data.availableExperiences.flatMap(exp => {
+    const unmatchedIds: string[] = [];
+    const exps = data.availableExperiences.flatMap(exp => {
       try {
         return {
           ...replaceTimeStrings(exp),
@@ -274,10 +277,17 @@ export abstract class LLClient extends ApiClient {
           experienced: this.tracker.experienced(exp),
         };
       } catch (error) {
-        if (error instanceof InvalidId) return [];
+        if (error instanceof InvalidId) {
+          // Ignored experiences are null in the resort data; don't report them
+          if (this.resort.isIgnored(exp.id)) return [];
+          unmatchedIds.push(exp.id);
+          return [];
+        }
         throw error;
       }
     });
+    this.unmatchedIds = unmatchedIds;
+    return exps;
   }
 
   track(bookings: Booking[]) {

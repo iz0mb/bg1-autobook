@@ -71,13 +71,19 @@ const Home = Object.assign(
       if (rebooking.current) ref.current?.scroll(0, 0);
     }, [rebooking]);
 
-    const { config, status } = use(AutoBookContext);
+    const { config, saveConfig, status } = use(AutoBookContext);
 
     return (
       <ThemeContext value={park.theme}>
         {config.enabled && (
-          <div className="px-3 py-1 text-xs text-center bg-blue-100 text-blue-800 border-b border-blue-200">
-            Auto Book: {status.message}
+          <div className="flex items-center justify-center gap-x-3 px-3 py-1 text-xs bg-blue-100 text-blue-800 border-b border-blue-200">
+            <span className="text-center">Auto Book: {status.message}</span>
+            <button
+              className="shrink-0 px-2 py-0.5 rounded font-semibold uppercase tracking-wide bg-red-600 text-white"
+              onClick={() => saveConfig({ ...config, enabled: false })}
+            >
+              Stop Run
+            </button>
           </div>
         )}
         <tab.component ref={ref} />

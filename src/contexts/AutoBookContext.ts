@@ -8,6 +8,8 @@ export interface AutoBookConfig {
   jitterPercent: number;
   maxMinutesFromNow: number;
   targetIds: string[];
+  // Guests assigned to each target; a target without an entry uses the whole party
+  guestIdsByTarget: { [experienceId: string]: string[] };
   webhookUrl: string;
   upgradeExisting: boolean;
   dryRun: boolean;
@@ -35,6 +37,7 @@ export const DEFAULT_AUTO_BOOK_CONFIG: AutoBookConfig = {
   jitterPercent: 25,
   maxMinutesFromNow: 120,
   targetIds: [],
+  guestIdsByTarget: {},
   webhookUrl: '',
   upgradeExisting: false,
   dryRun: false,
@@ -42,6 +45,20 @@ export const DEFAULT_AUTO_BOOK_CONFIG: AutoBookConfig = {
   resortCheckInDate: '',
   resortCheckOutDate: '',
 };
+
+export function sanitizeGuestIdsByTarget(
+  value: unknown
+): AutoBookConfig['guestIdsByTarget'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([id, ids]) => {
+      const guestIds = Array.isArray(ids)
+        ? ids.filter((g): g is string => typeof g === 'string')
+        : [];
+      return guestIds.length > 0 ? [[id, [...new Set(guestIds)]]] : [];
+    })
+  );
+}
 
 export default createContext<AutoBookContextValue>({
   config: DEFAULT_AUTO_BOOK_CONFIG,
